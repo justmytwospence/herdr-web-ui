@@ -1717,6 +1717,32 @@
   overflow-wrap: anywhere;
 }
 
+/* what a recognized command printed (Hermes /status), verbatim: the preview's card, open, with its Dismiss */
+.chat-outcome-result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.chat-outcome-result-text {
+  align-self: stretch;
+  margin: 0;
+  max-height: 60vh;
+  overflow: auto;
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (pointer: coarse) {
   .chat-outcome-action,
   .chat-outcome-preview > summary { min-height: var(--touch-target); }

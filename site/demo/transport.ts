@@ -449,6 +449,12 @@ function sentCommand(paneId: string, text: string): { name: string; form: Comman
   return { name, form, listed: true };
 }
 
+/** What Hermes's classic CLI printed for an informational command, as recorded (server/fixtures/hermes-results), with the demo pane's model. */
+const HERMES_PRINTED: Record<string, string> = {
+  status: ["Hermes CLI Status", "", "Session ID: 20261020_184853_b7a650", "Path: ~/.hermes", "Model: hermes-4-405b (nous)", "Approvals: smart",
+    "Created: 2026-10-20 18:48", "Last Activity: 2026-10-20 18:48", "Tokens: 0", "Agent Running: No"].join("\n"),
+};
+
 /** The screen after a terminal command, as the bridge previews it: the echo, then the lines the agent printed where the transcript does not reach. */
 function terminalPreview(paneId: string, text: string, name: string): string {
   return [`\u276f ${text}`, "", `${agentOf(paneId)} answered /${name} here, on its screen, and wrote nothing to its transcript.`, "The real app shows the pane's own lines; this is the demo's stand-in for them.", "", "\u276f "].join("\n");
@@ -480,6 +486,13 @@ function submitToChat(paneId: string, text: string): void {
   if (command?.form?.interaction === "terminal") {
     const outcome = recordOutcome(paneId, text, "terminal-required");
     setTimeout(() => { outcome.preview = terminalPreview(paneId, text, command.name); outcome.updated_at = now(); }, OUTCOME_PREVIEW_MS);
+    return;
+  }
+  const printed = agentOf(paneId) === "hermes" && command !== null ? HERMES_PRINTED[command.name] : undefined;
+  if (printed !== undefined) {
+    // Hermes prints /status on its screen and keeps no turn for it: the bridge's result reader shows what it printed
+    const outcome = recordOutcome(paneId, text, "accepted");
+    setTimeout(() => { outcome.result_text = printed; settleOutcome(outcome, "result-observed", "recognized-result"); }, OUTCOME_PREVIEW_MS);
     return;
   }
   if (command !== null) {

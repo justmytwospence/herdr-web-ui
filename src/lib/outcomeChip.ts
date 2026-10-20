@@ -123,6 +123,15 @@ export function outcomeRows(turns: readonly ConversationTurn[], outcomes: readon
   return rows;
 }
 
+/**
+ * What a recognized result printed (`result_text`, evidence `recognized-result`), for a card under the
+ * chip until it is dismissed here; dismissing only hides it in this view, nothing is sent.
+ */
+export function outcomeResultText(outcome: CommandOutcome, dismissed: boolean): string | null {
+  if (dismissed || outcome.state !== "result-observed" || outcome.evidence.at(-1)?.kind !== "recognized-result") return null;
+  return outcome.result_text || null;
+}
+
 /** Calls `invalidate` for each outcome that changed the agent's command list, once: `noted` keeps the ids already acted on. */
 export function noteCatalogChanges(outcomes: readonly CommandOutcome[], noted: Set<string>, invalidate: () => void): void {
   for (const outcome of outcomes) {

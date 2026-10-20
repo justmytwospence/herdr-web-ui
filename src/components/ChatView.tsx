@@ -63,7 +63,7 @@ import { formatElapsed, taskCallItems, taskResultMarkdown } from "../lib/omoTask
 import { sendUserFileCall } from "../lib/sendUserFile.ts";
 import { shouldFoldUserMessage } from "../lib/userMessageFold.ts";
 import { invalidatePaneCommands } from "../lib/paneCommandCache.ts";
-import { noteCatalogChanges, outcomeChip, outcomeCommand, outcomeLabel, outcomeRows, type OutcomeState } from "../lib/outcomeChip.ts";
+import { noteCatalogChanges, outcomeChip, outcomeCommand, outcomeLabel, outcomeResultText, outcomeRows, type OutcomeState } from "../lib/outcomeChip.ts";
 
 /** The pane this chat shows, for what its rows fetch on request (a tool call's whole output). */
 // How long after scroll input an upward move still counts as the reader's own.
@@ -646,7 +646,10 @@ function OutcomeChip({ outcome, actions }: { outcome: CommandOutcome; actions: O
   const chip = outcomeChip(outcome);
   const Icon = OUTCOME_ICONS[chip.state];
   const action = chip.action === "answer" ? actions?.answer ?? null : chip.action === "terminal" ? actions?.terminal ?? null : null;
-  const preview = outcome.preview ?? "";
+  // a recognized result shows what the agent printed; the unconfirmed preview of the same screen goes
+  const preview = outcome.result_text ? "" : outcome.preview ?? "";
+  const [dismissed, setDismissed] = useChatRowToggle(`outcome-result:${outcome.id}`, false);
+  const result = outcomeResultText(outcome, dismissed === true);
   return <div className="chat-outcome" data-outcome-state={chip.state}>
     <div className="chat-outcome-row">
       <span className="chat-outcome-state" role="status"><Icon aria-hidden="true" />{outcomeLabel(t, chip)}</span>
@@ -657,6 +660,11 @@ function OutcomeChip({ outcome, actions }: { outcome: CommandOutcome; actions: O
       <summary><ChevronDown className="chat-outcome-caret" aria-hidden="true" /><span role="status">{t("Terminal output changed after {command}, not confirmed", { command: outcomeCommand(outcome.text) })}</span></summary>
       <pre className="chat-outcome-preview-text">{preview}</pre>
     </ChatDetails>}
+    {/* the agent's own lines, verbatim; Dismiss only hides them here and sends nothing to the pane */}
+    {result !== null && <section className="chat-outcome-result" role="status" aria-label={t("What {command} printed", { command: outcomeCommand(outcome.text) })}>
+      <pre className="chat-outcome-result-text" tabIndex={0}>{result}</pre>
+      <button type="button" className="chat-outcome-action" onClick={() => setDismissed(true)}>{t("Dismiss")}</button>
+    </section>}
   </div>;
 }
 

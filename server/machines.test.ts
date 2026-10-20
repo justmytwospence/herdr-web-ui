@@ -82,7 +82,7 @@ describe("machine boundaries", () => {
     const manager = new MachineManager(dir, {} as PushService, new CompletionTracker(null), async () => { throw new Error("fixture offline"); });
     const answer: PanePromptResponse = { prompt: null, ...(older ? {} : { outcomes: [{
       id: "send-1", pane_id: "pane-1", text: "/context", state: "accepted" as const, evidence: [],
-      preview: "fixture-preview", created_at: "2026-10-20T00:00:00Z", updated_at: "2026-10-20T00:00:00Z",
+      preview: "fixture-preview", result_text: "fixture-result", created_at: "2026-10-20T00:00:00Z", updated_at: "2026-10-20T00:00:00Z",
     }] }) };
     const bridge = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json(answer) });
     const endpoint = spyOn(manager, "endpoint").mockReturnValue({ url: `http://127.0.0.1:${bridge.port}`, token: "fixture" });
@@ -94,8 +94,10 @@ describe("machine boundaries", () => {
       else {
         expect(watched.outcomes?.[0]?.state).toBe("accepted");
         expect(watched.outcomes?.[0]).not.toHaveProperty("preview");
+        expect(watched.outcomes?.[0]).not.toHaveProperty("result_text");
         const owner = await (await handleMachineRequest(request, manager)).json() as PanePromptResponse;
         expect(owner.outcomes?.[0]?.preview).toBe(answer.outcomes?.[0]?.preview);
+        expect(owner.outcomes?.[0]?.result_text).toBe(answer.outcomes?.[0]?.result_text);
       }
     } finally { endpoint.mockRestore(); bridge.stop(true); manager.stop(); rmSync(dir, { recursive: true, force: true }); }
   });

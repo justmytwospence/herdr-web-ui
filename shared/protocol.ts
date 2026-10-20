@@ -1102,6 +1102,8 @@ export interface CommandOutcome {
   }[];
   /** a passing view of the result, never merged into history */
   preview?: string;
+  /** what the command printed, verbatim with its line breaks, when a registered result reader recognized it (evidence `recognized-result`); bounded like `preview`, withheld from observers like it, never merged into history */
+  result_text?: string;
   /** the command changed the agent's command list: refetch it */
   catalog_changed?: true;
   /** when the outcome was created (ISO time) */

@@ -128,8 +128,10 @@ const BUILTINS: Readonly<Record<string, string>> = {
 };
 const CORE_NAMES = new Set([...Object.keys(BUILTINS), "start", "topic", "pause", "approve", "deny", "agents", "tasks", "sethome", "set-home", "resume", "sessions", "config", "model", "skin", "skills", "plugins", "commands", "restart", "platform"]);
 const TERMINAL_BOUND = ["model", "resume", "sessions", "config", "agents", "plugins", "skills", "skin"] as const;
-const UNKNOWN_FORMS: Record<string, CommandForm[]> = Object.fromEntries(
-  ["help", "status", "version", "profile", "reload-skills", "reload_skills"].map((name) => [name, [{ match: "bare", interaction: "unknown" }]]),
+// printed inline by the classic CLI and read by the result readers in server/dialogs/hermes.ts
+const RESULT_FORMS: Record<string, CommandForm[]> = Object.fromEntries(
+  [["help", "help"], ["status", "status"], ["version", "version"], ["v", "version"], ["profile", "profile"], ["reload-skills", "reload-skills"], ["reload_skills", "reload-skills"]]
+    .map(([name, reader]) => [name, [{ match: "bare", interaction: "dialog", dialog: `hermes-${reader}` }]]),
 );
 const SKIP_DIRS = new Set([".git", ".github", ".hub", ".archive", ".curator_backups", ".locks", ".venv", "venv", "node_modules", "site-packages", "__pycache__", ".tox", ".nox"]);
 const SUPPORT_DIRS = new Set(["references", "templates", "assets", "scripts"]);
@@ -287,7 +289,7 @@ function discover(ctx: AgentCommandContext): SlashCommand[] {
 export const source: AgentCommandSource = {
   builtins: Object.keys(BUILTINS),
   descriptions: BUILTINS,
-  forms: UNKNOWN_FORMS,
+  forms: RESULT_FORMS,
   terminalBound: TERMINAL_BOUND,
   pin: "0.21.5",
   discover,

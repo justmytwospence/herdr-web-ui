@@ -157,7 +157,7 @@ export async function handleMachineRequest(request: Request, manager: MachineMan
             const { plan_file: _planFile, ...card } = answer.prompt;
             answer.prompt = { ...card, body: null };
           }
-          if (answer.outcomes) answer.outcomes = answer.outcomes.map(({ preview: _preview, ...outcome }) => outcome);
+          if (answer.outcomes) answer.outcomes = answer.outcomes.map(({ preview: _preview, result_text: _resultText, ...outcome }) => outcome);
           body = new TextEncoder().encode(JSON.stringify(answer)).buffer as ArrayBuffer;
         }
         return new Response(body, { status: response.status, headers: {

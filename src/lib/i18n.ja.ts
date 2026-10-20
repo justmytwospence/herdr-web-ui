@@ -1058,6 +1058,7 @@ export const JA: Record<string, string> = {
   "No result seen": "結果を確認できません",
   "Answer": "回答する",
   "Terminal output changed after {command}, not confirmed": "{command} の後にターミナル出力が変わりましたが、未確認です",
+  "What {command} printed": "{command} の出力",
   "Skill activity": "スキルのアクティビティ",
   "Skill requested": "呼び出しを要求",
   "Skill invoked": "呼び出し済み",

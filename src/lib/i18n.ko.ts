@@ -1056,6 +1056,7 @@ export const KO: Record<string, string> = {
   "No result seen": "결과를 확인하지 못함",
   "Answer": "답변하기",
   "Terminal output changed after {command}, not confirmed": "{command} 뒤에 터미널 출력이 바뀌었지만 확인되지 않음",
+  "What {command} printed": "{command}가 출력한 내용",
   "Skill activity": "스킬 활동",
   "Skill requested": "호출 요청",
   "Skill invoked": "호출됨",

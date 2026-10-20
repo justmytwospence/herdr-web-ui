@@ -257,7 +257,7 @@ export class CommandReservations {
   }
 }
 
-function recognizedResult(sent: CommandSend, screen: string, readers: readonly DialogReader[]): { catalogChanged?: true } | null {
+function recognizedResult(sent: CommandSend, screen: string, readers: readonly DialogReader[]): { text: string; catalogChanged?: true } | null {
   const fullLines = screenLines(screen);
   const lines = withoutChrome(fullLines, sent.agent, readers);
   const before = withoutChrome(screenLines(sent.screen), sent.agent, readers);
@@ -289,7 +289,7 @@ function recognizedResult(sent: CommandSend, screen: string, readers: readonly D
     const parsed = reader.parse(below, context);
     const block = parsed?.resultText?.replace(ANSI_RE, "").replace(/\r\n/gu, "\n");
     if (!block || !below.includes(block) || below.slice(0, below.indexOf(block)).trim()) continue;
-    return parsed?.catalogChanged ? { catalogChanged: true } : {};
+    return { text: block, ...(parsed?.catalogChanged ? { catalogChanged: true as const } : {}) };
   }
   return null;
 }
@@ -302,6 +302,7 @@ export function commandOutcome(paneId: string, sent: CommandSend, observation: O
   let state: CommandOutcome["state"] = sent.form?.interaction === "terminal" ? "terminal-required" : "accepted";
   let evidence = previous?.evidence ?? [];
   let catalogChanged = previous?.catalog_changed;
+  let resultText = previous?.result_text;
   if (previous?.state === "result-observed") state = previous.state;
   else if (state !== "terminal-required") {
     const recorded = transcriptEvidence(sent, observation.transcript ?? "", until);
@@ -315,6 +316,8 @@ export function commandOutcome(paneId: string, sent: CommandSend, observation: O
       evidence = [{ kind: recorded !== null ? "transcript" : validExternal?.kind ?? "recognized-result",
         at: new Date(recorded ?? validExternal?.at ?? now).toISOString() }];
       catalogChanged = validExternal?.catalogChanged ?? result?.catalogChanged;
+      // what the reader recognized, shown verbatim; bounded like the preview
+      resultText = recorded === null && !validExternal ? result?.text.slice(0, 2000) : undefined;
     } else if (sent.form?.interaction === "dialog" && previous?.state === "terminal-required") state = previous.state;
     else if (observation.nextAt !== undefined || now >= until) state = "unknown";
     else if (observation.dialog && (!sent.form?.dialog || sent.form.dialog === observation.dialog.reader)) state = "interaction-required";
@@ -328,7 +331,7 @@ export function commandOutcome(paneId: string, sent: CommandSend, observation: O
   const changed = previous?.state !== state || previous.preview !== preview || previous.catalog_changed !== catalogChanged;
   return {
     id: sent.id, pane_id: paneId, text: sent.text, state, evidence,
-    ...(preview ? { preview } : {}), ...(catalogChanged ? { catalog_changed: true } : {}),
+    ...(preview ? { preview } : {}), ...(resultText ? { result_text: resultText } : {}), ...(catalogChanged ? { catalog_changed: true } : {}),
     created_at: new Date(sent.at).toISOString(), updated_at: changed ? new Date(now).toISOString() : previous.updated_at,
   };
 }

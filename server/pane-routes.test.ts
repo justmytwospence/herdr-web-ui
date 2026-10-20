@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, expect, it } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { paneCommands } from "./commands.ts";
+import { HERMES_ECHO_RE } from "./dialogs/hermes.ts";
+import { registry } from "./dialogs/registry.ts";
+import { findLastIndex } from "./dialogs/shared.ts";
 import { handlePaneRequest } from "./pane-routes.ts";
 import { paneAgentOf, resolveAgent } from "./pane-context.ts";
 
@@ -69,6 +72,51 @@ it("names an omo pane that herdr labels pi omo in the commands route, and types 
   expect(paneCommands("omo", root).find((command) => command.name === "quit")?.description).toBe("Quit omo");
   expect(await quit("w:p1")).toBe("Quit omo");
   expect(await quit("w:p2")).toBe(paneCommands("pi", root).find((command) => command.name === "quit")?.description);
+});
+
+/** a Hermes pane in the fake herdr, its skills under a HOME of the test's own */
+async function hermesPane(paneId: string, run: (f: { skill(name: string): void; names(): Promise<string[]> }) => Promise<void>): Promise<void> {
+  const homeBefore = process.env["HOME"];
+  process.env["HOME"] = root;
+  panes[paneId] = { agent: "hermes", process: [{ pid: 2147483645, argv: ["hermes"], cwd: root }] };
+  try {
+    await run({
+      skill(name) {
+        mkdirSync(join(root, ".hermes", "skills", name), { recursive: true });
+        writeFileSync(join(root, ".hermes", "skills", name, "SKILL.md"), `---\nname: ${name}\ndescription: Added on disk.\n---\nBody.\n`);
+      },
+      async names() {
+        const url = new URL(`http://x/api/pane/commands?pane_id=${paneId}`);
+        const response = await handlePaneRequest(new Request(url), url, "/api/pane/commands", {});
+        return ((await response!.json()) as { commands: { name: string }[] }).commands.map((command) => command.name);
+      },
+    });
+  } finally {
+    if (homeBefore === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = homeBefore;
+  }
+}
+
+it("lists a Hermes skill added on disk before a successful reload on the next commands request", async () => {
+  const screen = readFileSync(join(import.meta.dir, "fixtures", "hermes-results", "reload-skills-added-120.txt"), "utf8");
+  const lines = screen.split("\n");
+  const below = lines.slice(findLastIndex(lines, (line) => HERMES_ECHO_RE.exec(line.trimEnd())?.[1] === "/reload-skills") + 1).join("\n");
+  const reload = registry.readersFor("hermes").find((reader) => reader.id === "hermes-reload-skills")!;
+  await hermesPane("w:hermes", async ({ skill, names }) => {
+    expect(await names()).not.toContain("fixture-added");
+    skill("fixture-added");
+    // the recognized reload the client refetches on (catalog_changed)
+    expect(reload.parse(below, { agent: "hermes", omoAsk: null, omoTrusted: false, omoOpen: [], sent: "/reload-skills", working: false })?.catalogChanged).toBeTrue();
+    expect(await names()).toContain("fixture-added");
+  });
+});
+
+it("reflects a /reload-skills typed in Hermes's own terminal on the next commands request", async () => {
+  await hermesPane("w:typed", async ({ skill, names }) => {
+    expect(await names()).not.toContain("typed-reload-skill");
+    skill("typed-reload-skill");
+    expect(await names()).toContain("typed-reload-skill");
+  });
 });
 
 it("resolves a pane with no agent to null and its commands route to []", async () => {

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { CommandOutcome, ConversationTurn } from "../../shared/protocol.ts";
 import { translate } from "./i18n.ts";
-import { noteCatalogChanges, outcomeChip, outcomeCommand, outcomeLabel, outcomeRows } from "./outcomeChip.ts";
+import { noteCatalogChanges, outcomeChip, outcomeCommand, outcomeLabel, outcomeResultText, outcomeRows } from "./outcomeChip.ts";
 
 const en = (key: string, vars?: Record<string, string | number>): string => translate("en", key, vars);
 
@@ -155,5 +155,26 @@ describe("outcomeRows", () => {
       { kind: "turn", index: 1, outcome: null },
     ]);
     expect(outcomeRows([], [old])).toEqual([{ kind: "sent", outcome: old }]);
+  });
+});
+
+describe("outcomeResultText", () => {
+  const at = "2026-10-20T10:00:00.000Z";
+  const printed = "Hermes CLI Status\n\nSession ID: fixture\nAgent Running: No";
+  const recognized = outcome({ text: "/status", created_at: at, state: "result-observed", evidence: [{ kind: "recognized-result", at }], result_text: printed });
+
+  test("shows a recognized result's text verbatim, line breaks kept, until it is dismissed here", () => {
+    expect(outcomeResultText(recognized, false)).toBe(printed);
+    expect(outcomeResultText(recognized, true)).toBeNull();
+    // dismissing only flips this view's flag: the outcome itself is untouched, so nothing is sent or changed
+    expect(recognized.result_text).toBe(printed);
+    expect(outcomeChip(recognized)).toEqual({ state: "result-observed", evidence: "recognized-result", action: null });
+  });
+
+  test("shows no card without a recognized result, whatever text came along", () => {
+    expect(outcomeResultText({ ...recognized, evidence: [{ kind: "transcript", at }] }, false)).toBeNull();
+    expect(outcomeResultText({ ...recognized, state: "accepted", evidence: [] }, false)).toBeNull();
+    expect(outcomeResultText({ ...recognized, result_text: undefined }, false)).toBeNull();
+    expect(outcomeResultText({ ...recognized, result_text: "" }, false)).toBeNull();
   });
 });

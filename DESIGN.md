@@ -1407,7 +1407,12 @@ Alert rows of the table above from the `--droplet-*` roles in `src/styles.css`.
   and nothing animates a change. A screen that changed after the send folds under the chip as
   **Terminal output changed after /x, not confirmed** (`.chat-outcome-preview`, a `--radius-md`
   hairline card on `--bg-elevated`, mono `--fs-xs` text with its line breaks kept, 60vh at most),
-  a passing view that never becomes a result. The chip's **Answer** / **Open Terminal** are text
+  a passing view that never becomes a result. A result a registered reader recognized (Hermes
+  `/status`, `/version`, `/profile`, `/help`, `/reload-skills`) instead shows what the agent printed,
+  verbatim, in the same card open (`.chat-outcome-result`, `role="status"`, its text focusable for
+  scrolling) with **Dismiss**, which only hides it in this view and sends nothing, as an
+  informational sheet is closed in the Claude and Codex apps; no keys reach the pane.
+  The chip's **Answer** / **Open Terminal** are text
   buttons in the fold control's register (`--chip-h`, `--touch-target` where the primary pointer
   is coarse). A command the transcript keeps no turn for (Claude's `/btw`, an informational
   command) still gets a sent row (`.chat-turn-sent`): the same neutral bubble, time and copy,

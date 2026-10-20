@@ -1060,6 +1060,7 @@ export const ZH: Record<string, string> = {
   "No result seen": "未看到结果",
   "Answer": "回答",
   "Terminal output changed after {command}, not confirmed": "{command} 之后终端输出有变化，未经确认",
+  "What {command} printed": "{command} 的输出",
   "Skill activity": "Skill 活动",
   "Skill requested": "已请求调用",
   "Skill invoked": "已调用",

@@ -400,7 +400,8 @@ function hintAtEnd(shown: string[], atEnd: RegExp, footerLines: number, span = 3
 
 function parsePrompt(agent: string, screen: string, omoAsk: OmoAsk | null = null, omoTrusted = true, omoOpen: OmoAsk[] = [], sent: string | null = null, working = false): ParsedPrompt | null {
   const ctx = { agent, omoAsk, omoTrusted, omoOpen, sent, working };
-  const candidates = registry.readersFor(agent).map((reader) => reader.parse(screen, ctx));
+  // a result reader reads only below a send's own echo (outcome.ts), never a card on the whole screen
+  const candidates = registry.readersFor(agent).filter((reader) => reader.kind !== "result").map((reader) => reader.parse(screen, ctx));
   return candidates.find((candidate): candidate is ParsedPrompt => candidate !== null && promptTailIsActive(candidate, screen)) ?? null;
 }
 
@@ -1462,7 +1463,7 @@ export async function handlePromptRequest(request: Request, url: URL, options: P
         prompt,
         suggestion: box === null ? null : parseClaudeSuggestion(box),
         restored: box === null ? null : await restoredOnLiveScreen(paneId, box).catch(() => null),
-        ...(outcomes.length ? { outcomes: watching ? outcomes.map(({ preview: _preview, ...outcome }) => outcome) : outcomes } : {}),
+        ...(outcomes.length ? { outcomes: watching ? outcomes.map(({ preview: _preview, result_text: _resultText, ...outcome }) => outcome) : outcomes } : {}),
       } satisfies PanePromptResponse);
     }
 
