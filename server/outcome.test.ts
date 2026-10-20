@@ -10,6 +10,7 @@ import { handlePromptRequest, noteSubmitted } from "./prompt.ts";
 import { socketAddress } from "./herdr/client.ts";
 import { registry } from "./dialogs/registry.ts";
 import { source as claudeSource } from "./skills/claude.ts";
+import { source as ompSource } from "./skills/omp.ts";
 
 const at = Date.parse("2026-10-20T00:00:00Z");
 const row = (name: string, interaction: "none" | "dialog" | "terminal" | "unknown" = "none"): SlashCommand => ({
@@ -349,6 +350,40 @@ describe("integrated dialog readers", () => {
       const other = { ...current, id: "other-send", form: { match: "bare" as const, interaction: "dialog" as const, dialog: "claude-model" }, outcome: undefined, dialogId: undefined };
       noteSubmitted(paneId, other.text, other);
       expect((await served(paneId)).outcomes?.at(-1)).toMatchObject({ id: "other-send", state: "accepted" });
+    });
+  });
+
+  const handoffRow: SlashCommand = { name: "handoff", source: "builtin", description: "", forms: ompSource.forms!.handoff };
+  const compaction = (method: string, time: number): string => {
+    const recorded = fixture("omp-handoff-18.8.7-session.jsonl").split("\n").find((line) => line.includes('"type":"compaction"'))!;
+    return JSON.stringify({ ...JSON.parse(recorded), method, timestamp: new Date(time).toISOString() });
+  };
+  it("resolves omp's /handoff only from the handoff compaction appended after the send", () => {
+    const sent = send("/handoff", "omp", [handoffRow]);
+    expect(sent.form).toEqual({ match: "bare", interaction: "dialog", dialog: "omp-handoff" });
+    expect(registry.readerFor("omp-handoff")?.id).toBe(sent.form!.dialog!);
+    expect(outcome(sent, { transcript: compaction("handoff", at + 10) })).toMatchObject({ state: "result-observed", evidence: [{ kind: "transcript" }] });
+    expect(outcome(send("/handoff focus on tests", "omp", [handoffRow]), { transcript: compaction("handoff", at + 10) }).state).toBe("result-observed");
+    expect(outcome(sent, { transcript: compaction("handoff", at - 10) }).state).toBe("accepted");
+    expect(outcome(sent, { transcript: compaction("auto", at + 10) }).state).toBe("accepted");
+  });
+  it("keeps omp's /handoff interaction-required on its card, and a cancel from it never resolves the send", async () => {
+    const pane = { agent: "omp", status: "working", screen: fixture("omp-handoff-18.8.7-generating-narrow.txt") };
+    await withFakeHerdr(pane, async (paneId, keys) => {
+      const current = { ...send("/handoff", "omp", [handoffRow]), at: Date.now() - 1, id: "handoff-send", identity: JSON.stringify([undefined, undefined]), store: null };
+      noteSubmitted(paneId, current.text, current);
+      const shown = await served(paneId);
+      expect(shown.prompt).toMatchObject({ agent: "omp", question: "Generating handoff…", options: [{ label: "Cancel" }] });
+      expect(shown.outcomes?.at(-1)).toMatchObject({ id: "handoff-send", state: "interaction-required" });
+      expect(current.dialogId).toBe(shown.prompt!.id);
+      const answerUrl = new URL("http://localhost/api/pane/prompt/answer");
+      const answered = await handlePromptRequest(new Request(answerUrl, { method: "POST", body: JSON.stringify({ pane_id: paneId, prompt_id: shown.prompt!.id, option_index: 0 }) }), answerUrl);
+      expect(answered?.status).toBe(200);
+      expect(keys).toEqual([["esc"]]);
+      pane.screen = fixture("omp-handoff-18.8.7-cancelled-narrow.txt");
+      const after = await served(paneId);
+      expect(after.prompt).toBeNull();
+      expect(after.outcomes?.at(-1)).toMatchObject({ id: "handoff-send", state: "accepted", evidence: [] });
     });
   });
 });

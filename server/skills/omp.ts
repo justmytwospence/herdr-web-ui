@@ -49,8 +49,9 @@ const FORMS: Record<string, CommandForm[]> = {
   // A bare /model opens a picker; the /switch reader of #1377 is not registered on this base, so no
   // dialog is named yet. /model <args> sets the model and is stored as a model change.
   model: [{ match: "bare", interaction: "unknown" }, { match: "other", interaction: "none" }],
-  // omp compacts in place since 17.4.0; the form that opens its own dialog arrives with the handoff reader.
-  handoff: [{ match: "bare", interaction: "unknown" }],
+  // omp compacts in place since 17.4.0, and with or without focus instructions shows only the
+  // "Generating handoff" status, cancelled with Esc (recorded on 18.8.7): no $EDITOR step.
+  handoff: [{ match: "bare", interaction: "dialog", dialog: "omp-handoff" }, { match: "other", interaction: "dialog", dialog: "omp-handoff" }],
   btw: [{ match: "bare", interaction: "none" }, { match: "other", interaction: "none" }],
 };
 

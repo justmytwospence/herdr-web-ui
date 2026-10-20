@@ -309,6 +309,8 @@ function promptTailIsActive(prompt: ParsedPrompt, screen: string): boolean {
   if (prompt.responder === "claude-confirm") return ends(CLAUDE_CONFIRM_HINT_RE);
   // its parser already found the hint over the input box with only the footer under it
   if (prompt.responder === "claude-held") return true;
+  // so has omp's handoff status: only omp's status bar and editor under it
+  if (prompt.responder === "omp-handoff") return true;
   // the goal dialog ends the screen with its own dismiss hint
   if (prompt.responder === "claude-goal") return ends(/esc to dismiss$/i);
   if (prompt.responder === "claude-model") return claudeModelListWaits(screen);
@@ -1811,7 +1813,8 @@ export async function handlePromptRequest(request: Request, url: URL, options: P
         }
         answered = true;
         const sent = chatSent.get(body.pane_id)?.commands.at(-1);
-        if (committed && sent?.dialogId === prompt.id) noteCommandEvidence(body.pane_id, sent.id, { kind: "dialog", at: Date.now() });
+        // the card's Esc row (a cancel or refusal: omp's handoff Cancel, Codex's No) is not the command's result
+        if (committed && sent?.dialogId === prompt.id && body.option_index !== parsed.rejectWithEscapeIndex) noteCommandEvidence(body.pane_id, sent.id, { kind: "dialog", at: Date.now() });
       } catch (error) {
         if (error instanceof InvalidAnswer) return badRequest("invalid_answer", error.message);
         throw error;

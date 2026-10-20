@@ -229,7 +229,9 @@ describe("omp builtin registry", () => {
   it("gives model, handoff and btw their own forms", () => {
     // #1377's /switch reader is not on this base, so a bare /model names no dialog yet.
     expect(source.forms?.model).toEqual([{ match: "bare", interaction: "unknown" }, { match: "other", interaction: "none" }]);
-    expect(source.forms?.handoff).toEqual([{ match: "bare", interaction: "unknown" }]);
+    expect(source.forms?.handoff).toEqual([
+      { match: "bare", interaction: "dialog", dialog: "omp-handoff" }, { match: "other", interaction: "dialog", dialog: "omp-handoff" },
+    ]);
     expect(source.forms?.btw).toEqual([{ match: "bare", interaction: "none" }, { match: "other", interaction: "none" }]);
     expect(source.pin).toBe("18.12.3");
   });

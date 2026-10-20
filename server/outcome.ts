@@ -124,6 +124,8 @@ function transcriptEvidence(sent: CommandSend, text: string, until: number): num
       }
       if (entry.type === "thinking_level_change" && ["thinking", "effort", "efforts"].includes(name) && argument === entry.thinkingLevel) return time;
       if (entry.type === "compaction" && name === "compact") return time;
+      // omp's /handoff writes its document as an in-place compaction (method "handoff" on 18.8.7)
+      if (sent.agent === "omp" && entry.type === "compaction" && entry.method === "handoff" && name === "handoff") return time;
     }
     if (sent.agent === "codex" && entry.type === "compacted" && name === "compact") return time;
   }
