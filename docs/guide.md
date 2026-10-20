@@ -339,6 +339,9 @@ While the app is in front on any device, its window visible and focused, no aler
 device: you are already looking at the change. Alerts resume once no window of the app is in use.
 The test push is always sent.
 
+Opening the app on a workspace clears that workspace's alerts. iOS lets an alert be removed only
+30 seconds after it arrived, so a fresh one stays until the workspace is viewed again.
+
 On a phone:
 - Agent panes open in the chat.
 - The terminal gets a key bar above the keyboard (Esc, Tab, Ctrl+C, Ctrl, Alt, Shift, Enter, arrows).

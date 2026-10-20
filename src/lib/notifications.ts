@@ -89,6 +89,24 @@ async function show(paneId: string, title: string, body: string, onClick?: () =>
   }
 }
 
+/**
+ * The workspace on screen has been seen: close the delivered alerts (pushed or shown by a
+ * tab) about its panes, by the machine and workspace they name, and leave the rest. Native
+ * apps clear what was read; on iOS nothing else does, and it refuses to close an alert for
+ * 30 s after showing it.
+ */
+export async function clearWorkspaceNotifications(machineId: string, workspaceId: string): Promise<void> {
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration();
+    for (const notification of (await registration?.getNotifications()) ?? []) {
+      const data = notification.data as { machine_id?: string; workspace_id?: string | null } | null;
+      if ((data?.machine_id || "local") === machineId && data?.workspace_id === workspaceId) notification.close();
+    }
+  } catch {
+    /* no worker or no getNotifications here: nothing to clear */
+  }
+}
+
 /** `workspaceId`: the pane's workspace, as the server's push names it (server/push.ts), so a tap after the pane ends opens it. */
 export function showPaneStatusNotification(paneId: string, title: string, status: AgentStatus, onClick?: () => void, machineId = "local", workspaceId?: string): void {
   void show(paneId, title, statusNotificationBody(status), onClick, machineId, workspaceId);
