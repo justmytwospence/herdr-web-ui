@@ -68,8 +68,12 @@ export interface AlertTiming {
   long: number;
   /** the least a turn works for its finish to be worth an alert (`done: "long"`) */
   longTurn: number;
+  /** a question; unset, it follows a `short` that was set, else INPUT_ALERT_DELAY_MS */
+  input?: number;
 }
 export const DEFAULT_ALERT_TIMING: AlertTiming = { short: 10_000, long: 60_000, longTurn: 60_000 };
+/** A question gives a desk-side answer 30 s to call off the phone's alert; finishes keep `short`. */
+export const INPUT_ALERT_DELAY_MS = 30_000;
 
 export interface PushSubscriptionRecord {
   endpoint: string;
@@ -323,6 +327,7 @@ export function createPushService(options: PushServiceOptions): PushService {
   }
 
   const timing = { ...DEFAULT_ALERT_TIMING, ...options.timing };
+  const inputDelay = options.timing?.input ?? options.timing?.short ?? INPUT_ALERT_DELAY_MS;
   const now = options.now ?? Date.now;
   /** when each pane's current turn began: from `working`/`blocked` entered, until idle or done */
   const turnStart = new Map<string, number>();
@@ -338,7 +343,7 @@ export function createPushService(options: PushServiceOptions): PushService {
 
   /** How long a device waits before this alert reaches it, or null: it does not want it. */
   function delayFor(prefs: AlertPrefs, status: AgentStatus, worked: number | null): number | null {
-    if (status === "blocked") return prefs.input ? timing.short : null;
+    if (status === "blocked") return prefs.input ? inputDelay : null;
     if (status !== "done" || prefs.done === "off") return null;
     if (prefs.done === "always") return timing.short;
     // a turn that began before this server knew the pane is of unknown length: tell it
