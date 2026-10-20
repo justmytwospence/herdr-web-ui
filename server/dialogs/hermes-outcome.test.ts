@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PanePromptResponse } from "../../shared/protocol.ts";
 import { socketAddress } from "../herdr/client.ts";
-import { handlePromptRequest, noteSubmitted } from "../prompt.ts";
+import { handlePromptRequest, noteSubmitted, prepareCommandSend } from "../prompt.ts";
 import { paneCommands } from "../commands.ts";
 import { commandInvocations, commandOutcome, CommandReservations, type CommandSend } from "../outcome.ts";
 import { hermesChromeStart, hermesEchoOf } from "./hermes.ts";
@@ -182,6 +182,35 @@ describe("Hermes result outcomes", () => {
       const watched = await (await handlePromptRequest(new Request(url), url, { readOnly: true }))?.json() as PanePromptResponse;
       expect(watched.outcomes?.at(-1)?.state).toBe("result-observed");
       expect(watched.outcomes?.at(-1)).not.toHaveProperty("result_text");
+    } finally {
+      if (previous === undefined) delete process.env.HERDR_SOCKET;
+      else process.env.HERDR_SOCKET = previous;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves a send untracked instead of failing it when the pre-send screen read fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-hermes-presend-"));
+    const socketPath = join(root, "herdr.sock");
+    const previous = process.env.HERDR_SOCKET;
+    const paneId = `hermes-presend-${Date.now()}`;
+    const server = createServer((socket) => {
+      let input = "";
+      socket.on("data", (chunk) => {
+        input += chunk;
+        if (!input.includes("\n")) return;
+        const request = JSON.parse(input) as { id: string; method: string };
+        socket.end(`${JSON.stringify(request.method === "pane.read"
+          ? { id: request.id, error: { code: "pane_not_found", message: "pane read failed" } }
+          : { id: request.id, result: {} })}\n`);
+      });
+    });
+    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socketAddress(socketPath), resolve); });
+    process.env.HERDR_SOCKET = socketPath;
+    try {
+      const pane = { pane_id: paneId, agent: "hermes", agent_status: "idle" } as Parameters<typeof prepareCommandSend>[0];
+      expect(await prepareCommandSend(pane, "/status")).toBeUndefined();
     } finally {
       if (previous === undefined) delete process.env.HERDR_SOCKET;
       else process.env.HERDR_SOCKET = previous;

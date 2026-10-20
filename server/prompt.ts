@@ -3,7 +3,7 @@ import type { HerdrPane, InteractivePrompt, InteractivePromptOption, PanePromptR
 import { paneCommands } from "./commands.ts";
 import { paneProcessRoots, paneTranscript, readCommandTranscript } from "./conversation.ts";
 import { resolveAgent, versionSourceOf } from "./pane-context.ts";
-import { commandInvocations, commandOutcome, CommandReservations, dialogSettlingScreen, type CommandSend } from "./outcome.ts";
+import { commandInvocations, commandOutcome, CommandReservations, dialogSettlingScreen, WINDOW_MS as COMMAND_WINDOW_MS, type CommandSend } from "./outcome.ts";
 import { codexTranscriptPath, paneCodexHome, unansweredCodexQuestions, type QueuedQuestion } from "./codex.ts";
 import { HerdrError, paneRead, paneScrollInfo, paneSendKeys, paneSendText, sessionSnapshot } from "./herdr/client.ts";
 import { omoTranscriptForPane } from "./omo.ts";
@@ -151,7 +151,9 @@ export async function prepareCommandSend(pane: HerdrPane, text: string, screen?:
   const invocations = commandInvocations(agent, text, commands);
   if (invocations.length === 0) return undefined;
   const transcript = await readCommandTranscript(pane.pane_id).catch(() => null);
-  const before = screen ?? await liveScreen(pane.pane_id);
+  // A failed pre-send read leaves the send untracked rather than failing its delivery.
+  const before = screen ?? await liveScreen(pane.pane_id).catch(() => undefined);
+  if (before === undefined) return undefined;
   return { id: randomBytes(12).toString("hex"), text, at: Date.now(), agent, identity: outcomeIdentity(pane),
     screen: before, invocations, form: invocations[0]?.form ?? null, store: transcript?.identity ?? null };
 }
@@ -187,9 +189,12 @@ async function commandOutcomes(paneId: string, pane: HerdrPane, prompt: Interact
   if (!chatSent.get(paneId)?.commands.length) return [];
   chatSent.get(paneId)?.reservations.prune(Date.now());
   screen ??= await liveScreen(paneId);
-  const transcript = await readCommandTranscript(paneId, codexHome).catch(() => null);
   const commands = chatSent.get(paneId)?.commands ?? [];
   const now = Date.now();
+  // The transcript can be megabytes; read it only while a send can still change from it.
+  const open = commands.some((sent) => sent.outcome?.state !== "result-observed" && sent.form?.interaction !== "terminal"
+    && now < sent.at + COMMAND_WINDOW_MS);
+  const transcript = open ? await readCommandTranscript(paneId, codexHome).catch(() => null) : null;
   const parsed = prompt ? parsedByPublicPrompt.get(prompt) : undefined;
   const readIndex = commands.findIndex((sent) => sent.id === readSendId);
   return commands.map((sent, index) => {

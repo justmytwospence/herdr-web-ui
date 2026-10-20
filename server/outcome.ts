@@ -84,7 +84,7 @@ export interface OutcomeObservation {
   readonly evidence?: { readonly kind: "dialog" | "native" | "side-store"; readonly at: number; readonly catalogChanged?: true };
 }
 
-const WINDOW_MS = 10 * 60_000;
+export const WINDOW_MS = 10 * 60_000;
 const normalize = (text: string): string => text.replace(/\s+/gu, " ").trim();
 const object = (value: unknown): Record<string, unknown> => typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
 
