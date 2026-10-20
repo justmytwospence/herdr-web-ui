@@ -3,7 +3,8 @@ import { recordConfirmation } from "./pushConfirm.ts";
 import type { AlertPrefs } from "../../shared/notify-policy.ts";
 import type { Settings } from "./settings.ts";
 import { ApiError, sendTestPush } from "./api.ts";
-import { notificationState, refreshNotificationState, requestNotificationPermission, type NotificationState } from "./notifications.ts";
+import { clearWorkspaceNotifications, notificationState, refreshNotificationState, requestNotificationPermission, type NotificationState } from "./notifications.ts";
+import { watchPageInUse } from "./presence.ts";
 import { ensurePushSubscription, pushSupported, registeredPushEndpoint, removePushSubscription } from "./push.ts";
 import { refreshPushHealth, resetPushHealth, runPushAction, type PushActionOutcome, type PushActionResult } from "./pushHealth.ts";
 import { hasNativePlugin, PUSH_PLUGIN } from "./nativeApp.ts";
@@ -22,6 +23,19 @@ export function repairOutcome(result: PushActionResult): PushActionOutcome {
   return result === "sent" ? { result, endpoint: registeredPushEndpoint() } : { result };
 }
 
+/**
+ * The workspace on screen (`workspaceId`, null while the page is locked or shows none), while
+ * the page is in use, has been seen: its delivered alerts are closed (lib/notifications.ts
+ * clearWorkspaceNotifications), as native apps clear what was read. Other workspaces' stay.
+ */
+export function useViewedWorkspaceAlerts(machineId: string, workspaceId: string | null): void {
+  useEffect(() => {
+    if (!workspaceId) return;
+    return watchPageInUse((inUse) => { if (inUse) void clearWorkspaceNotifications(machineId, workspaceId); });
+  }, [machineId, workspaceId]);
+}
+
+/** The browser's notification permission and whether this device has a push subscription. */
 export function useNotificationState() {
   const [notifications, setNotifications] = useState<NotificationState>(() => notificationState());
   // in the phone app the permission is the app's (lib/notifications.ts): read from the app at load,

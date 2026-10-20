@@ -78,6 +78,7 @@ import { useTabSheet } from "./lib/useTabSheet.ts";
 import type { AppActions, PaneView, PaneControls } from "./lib/actions.ts";
 import { removePushSubscription } from "./lib/push.ts";
 import { resetPushHealth, usePushHealth } from "./lib/pushHealth.ts";
+import { useViewedWorkspaceAlerts } from "./lib/useNotifications.ts";
 import { useUpdates } from "./lib/updates.ts";
 import { desktopUpdateBridge, useDesktopUpdate } from "./lib/desktopUpdate.ts";
 import { DesktopUpdateNotice, UpdateNotice } from "./components/UpdateControls.tsx";
@@ -455,6 +456,7 @@ export function App() {
   const { selectedPane } = useSelectedPane({ snapshot, selectedPaneId });
   useScreenWakeLock(settings.keepScreenOn && locked === false && selectedPane !== null && !inbox.shown);
   const { selectedWorkspace, presentedPaneId } = useSelectedLayout({ selectedPane, snapshot, drawerOpen: drawerOpen || inbox.shown, selectedMachineId, selectedPaneId, setSelectedPaneId, setAutoSelected });
+  useViewedWorkspaceAlerts(selectedMachineId, locked === false ? (selectedPane?.workspace_id ?? null) : null);
   const tabStripMounted = selectedPane !== null && selectedWorkspace !== null;
   const targetHerdr = selectedMachineId === "local" ? health?.herdr : selectedMachine?.herdr;
   const appLayout = appLayoutOf(targetHerdr);
