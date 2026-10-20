@@ -4,6 +4,7 @@ import { machinePath, type BridgeHealth, type HerdrIdentity, type Machine, type 
 import type {
   AgentKind,
   AgentRenameRequest,
+  CommandOutcome,
   ConversationResponse,
   CreateWorktreeRequest,
   CreateTabRequest,
@@ -25,6 +26,7 @@ import type {
   PaneDirection,
   PaneInfo,
   PanePlan,
+  PanePromptResponse,
   PaneReadResult,
   PaneResized,
   RepoDiffFileList,
@@ -757,13 +759,14 @@ export async function fetchPanePrompt(paneId: string, machineId = "local"): Prom
   return (await fetchPanePromptState(paneId, machineId)).prompt;
 }
 
-/** The waiting prompt, and with none, the next prompt the agent suggests; restored is a send the agent put back in its input box when it was cancelled (older servers send neither). */
-export async function fetchPanePromptState(paneId: string, machineId = "local"): Promise<{ prompt: InteractivePrompt | null; suggestion: string | null; restored: string | null }> {
-  const body = await getJson<{ prompt: InteractivePrompt | null; suggestion?: string | null; restored?: string | null }>(machinePath(machineId, `pane/prompt?pane_id=${encodeURIComponent(paneId)}`));
+/** The waiting prompt, and with none, the next prompt the agent suggests; restored is a send the agent put back in its input box when it was cancelled; outcomes are the pane's tracked command sends (older servers send none of the three). */
+export async function fetchPanePromptState(paneId: string, machineId = "local"): Promise<{ prompt: InteractivePrompt | null; suggestion: string | null; restored: string | null; outcomes: CommandOutcome[] }> {
+  const body = await getJson<PanePromptResponse>(machinePath(machineId, `pane/prompt?pane_id=${encodeURIComponent(paneId)}`));
   return {
     prompt: body.prompt,
     suggestion: typeof body.suggestion === "string" && body.suggestion !== "" ? body.suggestion : null,
     restored: typeof body.restored === "string" && body.restored !== "" ? body.restored : null,
+    outcomes: Array.isArray(body.outcomes) ? body.outcomes : [],
   };
 }
 

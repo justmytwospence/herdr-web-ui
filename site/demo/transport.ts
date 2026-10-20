@@ -12,10 +12,11 @@
  * one notice instead of a TUI. A message sent from a chat gets a demo answer.
  * What does not: files, images, push and remote PCs, which need a real machine.
  */
-import type { AgentIntegration, AgentStatus, CommandForm, ConversationTurn, IntegrationsResponse, Machine, MachineEvent, PaneDirection, PaneFindMatch, PaneFindRequest, PanePlan, PaneResized, PaneSplit, PaneSwapped, PaneZoomed, PendingMessage, PlanStep, PluginActionResult, PluginActions, PluginActionsResponse, PortalStatus, ServerMessage, SessionSnapshot, SlashCommand, TabMoved, UsageReport, WorkspaceCreated, WorkspaceInfo, WorktreeEntry, WorktreeListing, WorktreeOpened, WorktreeRemoved } from "../../shared/protocol.ts";
+import type { AgentIntegration, AgentStatus, CommandForm, CommandOutcome, ConversationTurn, IntegrationsResponse, Machine, MachineEvent, PaneDirection, PaneFindMatch, PaneFindRequest, PanePlan, PaneResized, PaneSplit, PaneSwapped, PaneZoomed, PendingMessage, PlanStep, PluginActionResult, PluginActions, PluginActionsResponse, PortalStatus, ServerMessage, SessionSnapshot, SlashCommand, TabMoved, UsageReport, WorkspaceCreated, WorkspaceInfo, WorktreeEntry, WorktreeListing, WorktreeOpened, WorktreeRemoved } from "../../shared/protocol.ts";
 import type { RepoDiffFile, RepoDiffFileList, RepoDiffFilePatch, RepoDiffRepository, RepoDiffScope } from "../../shared/protocol.ts";
 import { VOICE_DEFAULTS, type VoiceStatus } from "../../shared/voice.ts";
 import { isAgentName } from "../../shared/agent-name.ts";
+import { skillSyntax } from "../../shared/skill-syntax.ts";
 import { neighborPane } from "../../src/lib/layoutMap.ts";
 import { closeLayoutPane, resizeLayout, setLayoutSplitRatio, splitLayout, swapLayoutPanes } from "../../src/lib/layoutTree.ts";
 import { rollupStatus } from "../../src/lib/status.ts";
@@ -39,6 +40,8 @@ function redrawHistory(paneId: string): void {
 }
 const PROMPT_ANSWER_TURN_MS = 2600;
 const CHAT_ANSWER_MS = 2400;
+/** a terminal command's screen has changed this long after the send: its preview appears then */
+const OUTCOME_PREVIEW_MS = 600;
 /** the recording's gaps, capped so the replay stays brisk */
 const MAX_FRAME_GAP_MS = 500;
 /** Settings → Agent integrations: one of each state, in herdr's order */
@@ -384,6 +387,11 @@ const CLAUDE_HIDDEN: SlashCommand[] = [
   { name: "agents", description: "Manage agent configurations", source: "builtin", visibility: "agent-hidden", forms: [{ match: "bare", interaction: "dialog", dialog: "agents" }] },
   { name: "heapdump", description: "Write a heap snapshot", source: "builtin", visibility: "agent-hidden", forms: [{ match: "bare", interaction: "none" }] },
 ];
+/** Claude builtins the recording predates: a side question answered on the screen alone, and a context report the transcript keeps. */
+const CLAUDE_LATER: SlashCommand[] = [
+  { name: "btw", description: "Ask a side question without adding it to the conversation", source: "builtin", forms: [{ match: "bare", interaction: "terminal" }, { match: "other", interaction: "terminal" }] },
+  { name: "context", description: "Show how the context window is used", source: "builtin", forms: [{ match: "bare", interaction: "none" }] },
+];
 
 /** GET /api/pane/commands: the recorded Claude list, with its forms for a Claude pane. */
 function paneCommandRows(paneId: string): SlashCommand[] {
@@ -393,7 +401,57 @@ function paneCommandRows(paneId: string): SlashCommand[] {
     const forms = CLAUDE_FORMS[row.name];
     return { ...row, provenance: { transport: "static" as const, verified: false }, ...(forms ? { forms, id: row.name } : {}) };
   });
-  return [...described, ...CLAUDE_HIDDEN.map((row) => ({ ...row, provenance: { transport: "static" as const, verified: false }, id: row.name }))];
+  return [...described, ...[...CLAUDE_LATER, ...CLAUDE_HIDDEN].map((row) => ({ ...row, provenance: { transport: "static" as const, verified: false }, id: row.name }))];
+}
+
+/** The last five commands sent from Chat to each pane, as the bridge tracks them (GET /api/pane/prompt `outcomes`). */
+const outcomesByPane = new Map<string, CommandOutcome[]>();
+let nextOutcome = 1;
+/** per pane, the outcomes whose evidence arrives when its current mock turn ends */
+const settleAtTurnEnd = new Map<string, (() => void)[]>();
+
+function recordOutcome(paneId: string, text: string, state: CommandOutcome["state"]): CommandOutcome {
+  const at = now();
+  const outcome: CommandOutcome = { id: `demo-outcome-${nextOutcome++}`, pane_id: paneId, text, state, evidence: [], created_at: at, updated_at: at };
+  outcomesByPane.set(paneId, [...(outcomesByPane.get(paneId) ?? []), outcome].slice(-5));
+  return outcome;
+}
+
+function settleOutcome(outcome: CommandOutcome, state: CommandOutcome["state"], evidence?: CommandOutcome["evidence"][number]["kind"]): void {
+  outcome.state = state;
+  outcome.updated_at = now();
+  if (evidence !== undefined) outcome.evidence.push({ kind: evidence, at: outcome.updated_at });
+}
+
+/**
+ * The command a sent text invokes in this pane's syntax, as the composer reads it
+ * (shared/skill-syntax.ts): the leading `/word` for every agent and `$word` where `$` triggers, else
+ * an inline `/word` or `$word` for the agents that read one. Prose is null; a leading command no row
+ * lists is kept with no form, as a runtime command the bridge cannot describe.
+ */
+function sentCommand(paneId: string, text: string): { name: string; form: CommandForm | null; listed: boolean } | null {
+  const syntax = skillSyntax(agentOf(paneId));
+  const [first = "", ...rest] = text.trim().split(/\s+/);
+  const lead = /^([/$])([\w:-]+)$/.exec(first);
+  let name = lead !== null && (lead[1] === "/" || syntax.skillTriggers.includes("$")) ? lead[2]! : null;
+  if (name === null) {
+    for (const trigger of syntax.inline) {
+      const inline = new RegExp(`(?:^|\\s)\\${trigger}([\\w:-]+)`).exec(text);
+      if (inline !== null) { name = inline[1]!; break; }
+    }
+  }
+  if (name === null) return null;
+  const row = paneCommandRows(paneId).find((candidate) => candidate.name === name);
+  if (row === undefined) return lead !== null ? { name, form: null, listed: false } : null;
+  const sub = lead !== null ? rest[0] : undefined;
+  const form = row.forms?.find((candidate) => sub === undefined ? candidate.match === "bare" : typeof candidate.match === "object" && candidate.match.sub === sub)
+    ?? row.forms?.find((candidate) => candidate.match === "other") ?? null;
+  return { name, form, listed: true };
+}
+
+/** The screen after a terminal command, as the bridge previews it: the echo, then the lines the agent printed where the transcript does not reach. */
+function terminalPreview(paneId: string, text: string, name: string): string {
+  return [`\u276f ${text}`, "", `${agentOf(paneId)} answered /${name} here, on its screen, and wrote nothing to its transcript.`, "The real app shows the pane's own lines; this is the demo's stand-in for them.", "", "\u276f "].join("\n");
 }
 
 const now = () => new Date().toISOString();
@@ -408,11 +466,29 @@ function finishDemoTurn(paneId: string, status: "idle" | "done" = "done"): void 
   }
 }
 
-/** A sent Enter joins the conversation now; another Enter steers the current mock turn. */
+/**
+ * A sent Enter joins the conversation now; another Enter steers the current mock turn. A command
+ * gets an outcome: a terminal one is answered on the screen alone (no turn, no mock answer, a
+ * preview once the screen changed), the rest settle when the mock turn ends, on the evidence the
+ * bridge would have (the transcript, or the card for a dialog); one no row lists stays unknown.
+ */
 function submitToChat(paneId: string, text: string): void {
   const key = keyOfPane.get(paneId);
   const chat = key ? chats.get(key) : undefined;
   if (!chat) return;
+  const command = sentCommand(paneId, text);
+  if (command?.form?.interaction === "terminal") {
+    const outcome = recordOutcome(paneId, text, "terminal-required");
+    setTimeout(() => { outcome.preview = terminalPreview(paneId, text, command.name); outcome.updated_at = now(); }, OUTCOME_PREVIEW_MS);
+    return;
+  }
+  if (command !== null) {
+    const outcome = recordOutcome(paneId, text, command.form?.interaction === "dialog" ? "interaction-required" : "accepted");
+    settleAtTurnEnd.set(paneId, [...(settleAtTurnEnd.get(paneId) ?? []), () => {
+      if (!command.listed) settleOutcome(outcome, "unknown");
+      else settleOutcome(outcome, "result-observed", command.form?.interaction === "dialog" ? "dialog" : "transcript");
+    }]);
+  }
   chat.turns.push({ role: "user", ts: now(), parts: [{ kind: "text", text }] });
   conversationChanged(paneId);
   const agent = agentOf(paneId);
@@ -422,6 +498,8 @@ function submitToChat(paneId: string, text: string): void {
   setTimeout(() => {
     chat.turns.push({ role: "assistant", ts: now(), end_ts: now(), parts: [{ kind: "text", phase: "final_answer", text: `This is the demo, so nothing ran. In the real app that message went to ${agent} in this pane, and its answer would be written here as it arrives, with its commands and edits folded above it.` }] });
     conversationChanged(paneId);
+    for (const settle of settleAtTurnEnd.get(paneId) ?? []) settle();
+    settleAtTurnEnd.delete(paneId);
     finishDemoTurn(paneId);
   }, CHAT_ANSWER_MS);
 }
@@ -691,7 +769,7 @@ async function route(url: URL, method: string, init: RequestInit | undefined, in
     if (!paneId) return error("missing_pane_id", "pane_id query parameter is required", 400);
     return json({ plan: keyOfPane.get(paneId) === "api" ? { steps: planSteps } : null, server_time: new Date().toISOString() } satisfies PanePlan);
   }
-  if (path === "/api/pane/prompt") return json({ prompt: keyOfPane.get(paneId) === "web" && promptOpen ? { ...PROMPT, id: promptId } : null });
+  if (path === "/api/pane/prompt") return json({ prompt: keyOfPane.get(paneId) === "web" && promptOpen ? { ...PROMPT, id: promptId } : null, outcomes: outcomesByPane.get(paneId) ?? [] });
   if (path === "/api/pane/prompt/answer") {
     const body = await bodyOf(init, input);
     const target = String(body["pane_id"] ?? "");

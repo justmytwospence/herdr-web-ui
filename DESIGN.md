@@ -1393,6 +1393,26 @@ Alert rows of the table above from the `--droplet-*` roles in `src/styles.css`.
   first copy drops its own left inset so its glyph stays on the prose edge (an overhang past the
   transcript's edge cannot be tapped). With a mouse the copy and format buttons keep their `--chip-h`
   look and take a `--pointer-target` hit area through an invisible `::before` expander.
+- A command sent from the chat says what became of it under its bubble (`.chat-outcome`,
+  `lib/outcomeChip.ts`): one quiet `--fs-xs` line in `--text-dim` on the message's side, a 14px
+  glyph and the state in words, read as a `role="status"` live region. It follows the delivery
+  receipt messaging apps put under a sent bubble (iMessage's Delivered / Read; Claude's remote
+  clients show a read-receipt indicator under a sent prompt), not a toast or a notice row, and
+  unlike a receipt it names what the bridge saw: **Accepted** (hollow circle; the bridge sent it,
+  nothing more), **Waiting for your answer** (`CircleAlert` in `--status-blocked`, with **Answer**,
+  which focuses the waiting card), **Done · transcript / card answered / result on screen / agent
+  event / saved state** (`CircleCheck` in `--status-done`, the evidence that showed it), **Runs in
+  the terminal** (`SquareTerminal`, with **Open Terminal**) and **No result seen**
+  (`CircleQuestionMark`). The word changes on evidence alone: a typed-only command is never done,
+  and nothing animates a change. A screen that changed after the send folds under the chip as
+  **Terminal output changed after /x, not confirmed** (`.chat-outcome-preview`, a `--radius-md`
+  hairline card on `--bg-elevated`, mono `--fs-xs` text with its line breaks kept, 60vh at most),
+  a passing view that never becomes a result. The chip's **Answer** / **Open Terminal** are text
+  buttons in the fold control's register (`--chip-h`, `--touch-target` where the primary pointer
+  is coarse). A command the transcript keeps no turn for (Claude's `/btw`, an informational
+  command) still gets a sent row (`.chat-turn-sent`): the same neutral bubble, time and copy,
+  placed by its send time; once a transcript turn records the command the chip moves onto that
+  turn and the row goes, so a command never shows twice. Prose messages carry no chip.
 - Selecting text in chat copies the browser's rendered selection as plain text, not reconstructed
   Markdown. Safe rich HTML accompanies it for formatted paste; the explicit MD and TXT actions
   still copy the whole answer. This follows ordinary browser selection and the Claude/ChatGPT
