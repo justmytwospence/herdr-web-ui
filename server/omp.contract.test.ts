@@ -66,7 +66,7 @@ beforeAll(async () => {
   mkdirSync(handoffBin, { recursive: true });
   copyFileSync(process.execPath, join(handoffBin, "omp"));
   chmodSync(join(handoffBin, "omp"), 0o755);
-  const split = await herdrRpc<{ pane: { pane_id: string } }>("pane.split", { target: paneId, direction: "down", focus: false });
+  const split = await herdrRpc<{ pane: { pane_id: string } }>("pane.split", { target_pane_id: paneId, direction: "down", focus: false });
   handoffPaneId = split.pane.pane_id;
   const screens = ["generating-narrow.txt", "cancelled-narrow.txt"].map((name) => fileURLToPath(new URL(`./fixtures/omp-handoff-18.8.7-${name}`, import.meta.url)));
   await herdrRpc("pane.send_text", { pane_id: handoffPaneId, text: `exec '${join(handoffBin, "omp")}' '${join(root, "handoff.js")}' '${screens[0]}' '${screens[1]}' '${handoffMarker}'\n` });
