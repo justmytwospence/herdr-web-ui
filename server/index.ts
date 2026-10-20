@@ -7,7 +7,8 @@ import { dirname, join } from "node:path";
 import type { ServerWebSocket } from "bun";
 
 import type { AgentKind, AgentStatus, ClientMessage, ClientRole, HealthAuth, HerdrPane, IntegrationsResponse, PanePlan, PendingMessage, PlanSummary, PluginActionsResponse, ServerFeature, ServerMessage, SessionSnapshot } from "../shared/protocol.ts";
-import { alertStatus, paneTitle } from "../shared/notify-policy.ts";
+import { alertStatus, alertTitle } from "../shared/notify-policy.ts";
+import { hostname as osHostname } from "node:os";
 import { DEFAULT_PORT } from "../shared/protocol.ts";
 import { DEVICE_COOKIE, authClient, bearerMatches, handleAuthRequest, isAuthenticated, isSecureRequest, parseCookies, presentedToken, presentedTokenHeld, recordPresentedTokenFailure, requiresAuth, unauthorizedJson } from "./auth.ts";
 import { cameThroughProxy, decideAccess, isLoopbackAddress, isLoopbackBind, isServeOwnerRequest, lanExposed } from "./access.ts";
@@ -1017,7 +1018,10 @@ export function createServer(
       ...(window ? { flow: { stream_id: window.id, offset: window.write(bytes, wireBytes(data)) } } : {}),
     });
   }
+  // HERDR_WEB_ALERT_TITLE: a format names this PC's own panes after its hostname, as the PC list does
+  const alertTitleFormat = process.env["HERDR_WEB_ALERT_TITLE"]?.trim() || undefined;
   const push = createPushService({
+    titleFormat: alertTitleFormat,
     stateDir: options.stateDir ?? defaultStateDir(),
     // a timing given (tests) stands as it is; the server's own takes HERDR_WEB_INPUT_ALERT_DELAY
     timing: options.alertTiming ?? inputAlertTiming(process.env["HERDR_WEB_INPUT_ALERT_DELAY"]),
@@ -1026,7 +1030,7 @@ export function createServer(
     canDeliver: (id) => id === null || (id === undefined ? !devices.gated : devices.has(id)),
     inUse: () => present.size > 0,
     lookupTitle: async (paneId) => {
-      return paneTitle(await paneGet(paneId));
+      return alertTitle(await paneGet(paneId), alertTitleFormat ? osHostname() : undefined, alertTitleFormat);
     },
   });
 
@@ -1724,7 +1728,7 @@ export function createServer(
     onBaseline: (panes) => {
       // A resting baseline never reholds old work after a bridge restart.
       for (const pane of panes) if (pane.agent === "claude") waits.seed(pane.pane_id, pane.agent_status);
-      push.seed(panes.map((pane) => ({ ...pane, agent_status: alertStatus(pane.agent_status, waits.waiting(pane.pane_id)) })));
+      push.seed(panes.map((pane) => ({ ...pane, agent_status: alertStatus(pane.agent_status, waits.waiting(pane.pane_id)) })), "local", alertTitleFormat ? osHostname() : undefined);
       for (const pane of panes) {
         // A fast mirrored client may queue before the collector's first baseline. A
         // known ready baseline can schedule a fresh guarded check even when the tracker
