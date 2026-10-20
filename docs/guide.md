@@ -308,6 +308,7 @@ The test push is always sent.
 
 Each pane keeps one alert: a new one replaces its last. iOS lets an alert be removed only
 30 seconds after it arrived, so a quicker repeat stays until the pane's next alert.
+Opening the app on a workspace clears that workspace's alerts.
 
 On a phone:
 - Agent panes open in the chat.
