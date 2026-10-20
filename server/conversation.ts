@@ -1631,6 +1631,24 @@ export async function paneConversation(paneId: string, codexHome?: string, page:
   return answer;
 }
 
+/**
+ * Command evidence needs native control records that the conversation deliberately hides.
+ * Reuse its pane binding and branch projection, reading at most one existing tail window.
+ * Database agents are observed through their readers/native events, never guessed from turns.
+ */
+export async function readCommandTranscript(paneId: string, codexHome?: string): Promise<{ identity: string; text: string } | null> {
+  const resolved = await paneTranscript(paneId, codexHome);
+  const { source, path } = resolved;
+  if (!["claude-transcript", "codex-transcript", "pi-transcript", "omp-transcript", "omo-transcript", "gjc-transcript"].includes(source)) return null;
+  if (source === "devin-transcript" || source === "opencode-transcript" || source === "hermes-transcript") return null;
+  const stream = transcriptStream(source, path, statSync(path), resolved.codexHome ?? codexHome ?? defaultCodexHome());
+  applyHistoryBoundary(path, stream, source);
+  const start = Math.max(stream.floor, stream.length - TRANSCRIPT_WINDOW_BYTES);
+  const bytes = readStream(stream, start, stream.length);
+  const text = (start > stream.floor ? bytes.subarray(bytes.indexOf(0x0a) + 1) : bytes).toString("utf8");
+  return { identity: `${source}\0${path}\0${stream.id}`, text };
+}
+
 /** One page of a resolved transcript (paneConversation's `page`). */
 export function transcriptPage(source: StreamSource, path: string, page: ConversationPage = {}, codexHome?: string): RecognizedConversation {
   if (source === "agy-transcript") {

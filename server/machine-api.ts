@@ -1,7 +1,7 @@
 import type { MachineEvent, SetupAction, SetupRequest } from "../shared/machines.ts";
 import type { AgentRowTokens } from "../shared/pane-tokens.ts";
 import type { SharedPreferences } from "../shared/preferences.ts";
-import type { InteractivePrompt } from "../shared/protocol.ts";
+import type { PanePromptResponse } from "../shared/protocol.ts";
 import { MachineManager } from "./machines.ts";
 import { canSendSecret, sameOrigin } from "./machine-security.ts";
 import { isJsonObject, jsonResponse } from "./http.ts";
@@ -150,13 +150,15 @@ export async function handleMachineRequest(request: Request, manager: MachineMan
         const etag = response.headers.get("etag");
         let body = response.status === 304 ? null : await response.arrayBuffer();
         if (watchedPrompt && response.ok && body) {
-          const answer = JSON.parse(new TextDecoder().decode(body)) as { prompt?: InteractivePrompt | null };
+          const answer = JSON.parse(new TextDecoder().decode(body)) as PanePromptResponse;
           if (answer.prompt?.plan_file !== undefined) {
             // the body is the plan file's text and the screen's is not in the answer: the card keeps
             // its question and options, without a body
             const { plan_file: _planFile, ...card } = answer.prompt;
-            body = new TextEncoder().encode(JSON.stringify({ ...answer, prompt: { ...card, body: null } })).buffer as ArrayBuffer;
+            answer.prompt = { ...card, body: null };
           }
+          if (answer.outcomes) answer.outcomes = answer.outcomes.map(({ preview: _preview, ...outcome }) => outcome);
+          body = new TextEncoder().encode(JSON.stringify(answer)).buffer as ArrayBuffer;
         }
         return new Response(body, { status: response.status, headers: {
           "content-type": response.headers.get("content-type") ?? "application/json", "cache-control": "no-store", ...(etag ? { etag } : {}),

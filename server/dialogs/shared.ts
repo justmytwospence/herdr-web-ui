@@ -1,6 +1,25 @@
 import { type InteractivePrompt } from "../../shared/protocol.ts";
 import { type OpenCodeFormFieldOption, type OpenCodeFormInfo } from "../opencode-service.ts";
 import { createHash } from "node:crypto";
+import type { ReaderContext } from "./registry.ts";
+import type { InteractionPlan } from "./interaction-plan.ts";
+
+export interface DialogReader {
+  id: string;
+  agents: readonly string[];
+  priority: number;
+  /** Result readers must return resultText: a complete, fixture-recorded block. */
+  kind?: "result";
+  /** Recognize this agent's echoed command line; omitted readers use the standard prompt prefix. */
+  echoOf?(line: string, command: string): boolean;
+  /** First persistent bottom-chrome line; -1 (or lines.length) means none. Invalid indexes or hidden command echoes reject correlation; parsing keeps valid chrome. */
+  chromeStart?(lines: string[]): number;
+  /** A result reader's text may end with the next echo line as a completion boundary, never its following output. */
+  parse(screen: string, ctx: ReaderContext): ParsedPrompt | null;
+  reread: "before-commit" | "none";
+  list: "none" | "letter-window" | "slider";
+  interaction?(parsed: ParsedPrompt): InteractionPlan;
+}
 
 export const ANSI_RE = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 
@@ -65,6 +84,10 @@ type Responder =
   | "cmd-question";
 
 export type ParsedPrompt = InteractivePrompt & {
+  /** Exact contiguous result block, including its identifying header and completion footer. */
+  resultText?: string;
+  /** Only a recognized successful catalog reload sets this; never a generic screen delta. */
+  catalogChanged?: true;
   responder: Responder;
   /** Stable question identity across the folded widget and the expanded form. */
   omoQuestion?: { call: string; index: number };

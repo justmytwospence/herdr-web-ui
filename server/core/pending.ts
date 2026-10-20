@@ -13,7 +13,7 @@ import type { ClientMessage, HerdrPane, PendingMessage, SessionSnapshot } from "
 import { typingGuards } from "../input-guard.ts";
 import { claudeForegroundSession } from "../claude-store.ts";
 import { HerdrError, paneProcessInfo, paneRead, paneSendKeys, paneSendText } from "../herdr/client.ts";
-import { claudeHeldIsGrey, codexQuestionsCollapsed, isClaudeHeld, heldCandidate, noteSubmitted, parseInteractivePrompt, shownInputBox } from "../prompt.ts";
+import { claudeHeldIsGrey, codexQuestionsCollapsed, isClaudeHeld, heldCandidate, noteSubmitted, parseInteractivePrompt, prepareCommandSend, shownInputBox } from "../prompt.ts";
 import { registry } from "../dialogs/registry.ts";
 import { secretPrompt } from "../../shared/secret-prompt.ts";
 import { PendingInputs, samePendingIdentity, type PendingIdentity, type PendingRecord } from "../pending-input.ts";
@@ -162,7 +162,8 @@ export function createPendingDelivery({ options, clients, attachments, sight, se
       // The box is the live screen's; only the viewport read tells Claude's grey text from a draft. The live
       // read comes after the colors, so text typed between the two is in the box and holds the message.
       if (context.identity.agent === "claude") await freeClaudeBox(paneId, context.working, () => authorizePending(owner, paneId, lease), arrivedAt + (options.submitDeadlineMs ?? SUBMIT_DEADLINE_MS));
-      else if (context.identity.agent === "hermes") await freeHermesInput(paneId, context.identity);
+      else if (context.identity.agent === "hermes") context.screen = await freeHermesInput(paneId, context.identity);
+      const command = await prepareCommandSend(context.pane, text, context.screen);
       if (Date.now() - arrivedAt > (options.submitDeadlineMs ?? SUBMIT_DEADLINE_MS)) throw new HerdrError("submit_timeout", "The pending message waited too long; nothing was typed");
       authorizePending(owner, paneId, lease);
       // asked again right before herdr is written to: its connect is awaited (#666)
@@ -200,7 +201,7 @@ export function createPendingDelivery({ options, clients, attachments, sight, se
         // write is refused when the lease, the deadline or the pane's status moved meanwhile
         escape: (fresh) => paneSendKeys(paneId, ["Escape"], undefined, () => allowed() && fresh() && pending.current(paneId) === statusAtRead),
       });
-      noteSubmitted(paneId, text);
+      noteSubmitted(paneId, text, command);
       return { ok: true };
     } catch (error) {
       const fault = wrote ? { code: "submit_changed", message: "Pending-message delivery could not be confirmed. Check the terminal before sending again." } : pendingFault(error);
