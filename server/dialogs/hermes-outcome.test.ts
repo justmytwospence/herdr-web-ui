@@ -218,4 +218,60 @@ describe("Hermes result outcomes", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("reads the transcript on a prompt poll only while a sent command can still change from it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-hermes-transcript-gate-"));
+    const socketPath = join(root, "herdr.sock");
+    const previous = process.env.HERDR_SOCKET;
+    const paneId = `hermes-gate-${Date.now()}`;
+    let screen = fixture("status-120");
+    // every transcript lookup starts with its own session.snapshot
+    let snapshots = 0;
+    const server = createServer((socket) => {
+      let input = "";
+      socket.on("data", (chunk) => {
+        input += chunk;
+        if (!input.includes("\n")) return;
+        const request = JSON.parse(input) as { id: string; method: string };
+        if (request.method === "session.snapshot") snapshots++;
+        const result = request.method === "session.snapshot"
+          ? { snapshot: { panes: [{ pane_id: paneId, agent: "hermes", agent_status: "idle" }], layouts: [] } }
+          : { read: { text: screen } };
+        socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
+      });
+    });
+    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socketAddress(socketPath), resolve); });
+    process.env.HERDR_SOCKET = socketPath;
+    const url = new URL(`http://localhost/api/pane/prompt?pane_id=${paneId}`);
+    const poll = async () => {
+      snapshots = 0;
+      const body = await (await handlePromptRequest(new Request(url), url))?.json() as PanePromptResponse;
+      return { snapshots, state: body.outcomes?.at(-1)?.state };
+    };
+    const note = (id: string, at: number) => {
+      const invocations = commandInvocations("hermes", "/version", rows);
+      noteSubmitted(paneId, "/version", { id, text: "/version", at, agent: "hermes",
+        identity: JSON.stringify([undefined, undefined]), screen, invocations, form: invocations[0]?.form ?? null, store: null });
+    };
+    try {
+      note("hermes-gate-send", Date.now() - 1);
+      // no result yet: the send is open, so the poll looks up the transcript
+      const open = await poll();
+      expect(open.state).toBe("accepted");
+      screen = fixture("version-120");
+      expect((await poll()).state).toBe("result-observed");
+      // settled: the next poll reads one snapshot fewer, the transcript's
+      const settled = await poll();
+      expect(settled).toEqual({ snapshots: open.snapshots - 1, state: "result-observed" });
+      // a send past the ten-minute window cannot change either
+      screen = fixture("status-120");
+      note("hermes-gate-expired", Date.now() - 11 * 60_000);
+      expect((await poll()).snapshots).toBe(settled.snapshots);
+    } finally {
+      if (previous === undefined) delete process.env.HERDR_SOCKET;
+      else process.env.HERDR_SOCKET = previous;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
