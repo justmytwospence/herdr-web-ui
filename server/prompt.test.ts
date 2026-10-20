@@ -4856,6 +4856,24 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
     });
   }, 20_000);
 
+  test("sends no Esc to Claude's goal dialog once it shows another goal than the card's", async () => {
+    const goal = (name: string) => readFileSync(new URL("./fixtures/claude-goal-2.1.304-active-120.txt", import.meta.url), "utf8").replaceAll("hello.txt", name);
+    await withPane("claude", "idle", goal("hello.txt"), async (pane) => {
+      // the card's read, the answer's own read of the card, then its look before the key
+      let reads = 0;
+      pane.onRead = () => { reads += 1; if (reads === 3) pane.screen = goal("other.txt"); };
+      const prompt = (await card())!;
+      expect(prompt.title).toBe("Goal active");
+      expect(await answer(prompt.id, { option_index: 0 })).toEqual({ status: 409, code: "prompt_changed" });
+      expect(pane.sent).toEqual([]);
+    });
+    await withPane("claude", "idle", goal("hello.txt"), async (pane) => {
+      const prompt = (await card())!;
+      expect(await answer(prompt.id, { option_index: 0 })).toEqual({ status: 200, code: undefined });
+      expect(pane.sent).toEqual(["esc"]);
+    });
+  });
+
   // each refusal waits out the answer's own 1.5 s for the list to show the row
   test("types no s, and no further arrow, once Claude's model list is not the one that was tapped", async () => {
     // closed in the terminal right after the answer read it, with no move to wait on: the look

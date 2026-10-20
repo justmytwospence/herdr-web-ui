@@ -1,5 +1,5 @@
 import { describe, expect, it, spyOn } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { finishPrompt, type DialogReader } from "./dialogs/shared.ts";
 import { handlePromptRequest, noteSubmitted } from "./prompt.ts";
 import { socketAddress } from "./herdr/client.ts";
 import { registry } from "./dialogs/registry.ts";
+import { source as claudeSource } from "./skills/claude.ts";
 
 const at = Date.parse("2026-10-20T00:00:00Z");
 const row = (name: string, interaction: "none" | "dialog" | "terminal" | "unknown" = "none"): SlashCommand => ({
@@ -293,6 +294,64 @@ const resultReader: DialogReader = {
     resultText: block, catalogChanged: true };
   },
 };
+
+/** A herdr stand-in serving one pane whose screen the test sets; keys sent to it are kept. */
+async function withFakeHerdr(pane: { agent: string; status: string; screen: string }, run: (paneId: string, keys: unknown[]) => Promise<void>): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), "herdr-outcome-reader-"));
+  const socketPath = join(root, "herdr.sock");
+  const previous = process.env.HERDR_SOCKET;
+  const paneId = `outcome-reader-${Date.now()}`;
+  const keys: unknown[] = [];
+  const server = createServer((socket) => {
+    let input = "";
+    socket.on("data", (chunk) => {
+      input += chunk;
+      if (!input.includes("\n")) return;
+      const request = JSON.parse(input) as { id: string; method: string; params?: { keys?: unknown } };
+      if (request.method === "pane.send_keys") keys.push(request.params?.keys);
+      const result = request.method === "session.snapshot"
+        ? { snapshot: { panes: [{ pane_id: paneId, agent: pane.agent, agent_status: pane.status }], layouts: [] } }
+        : { read: { text: pane.screen } };
+      socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
+    });
+  });
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socketAddress(socketPath), resolve); });
+  process.env.HERDR_SOCKET = socketPath;
+  try {
+    await run(paneId, keys);
+  } finally {
+    if (previous === undefined) delete process.env.HERDR_SOCKET;
+    else process.env.HERDR_SOCKET = previous;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const fixture = (name: string): string => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
+const promptUrl = (paneId: string): URL => new URL(`http://localhost/api/pane/prompt?pane_id=${paneId}`);
+const served = async (paneId: string): Promise<PanePromptResponse> =>
+  await (await handlePromptRequest(new Request(promptUrl(paneId)), promptUrl(paneId)))?.json() as PanePromptResponse;
+
+describe("integrated dialog readers", () => {
+  it("keeps a bare Claude /goal interaction-required while its own goal card is up", async () => {
+    const goal: SlashCommand = { name: "goal", source: "builtin", description: "", forms: claudeSource.forms!.goal };
+    const sent = send("/goal", "claude", [goal]);
+    expect(sent.form).toEqual({ match: "bare", interaction: "dialog", dialog: "claude-goal" });
+    expect(registry.readerFor("claude-goal")?.id).toBe(sent.form!.dialog!);
+    await withFakeHerdr({ agent: "claude", status: "idle", screen: fixture("claude-goal-2.1.304-active-120.txt") }, async (paneId) => {
+      const current = { ...sent, at: Date.now() - 1, id: "goal-send", identity: JSON.stringify([undefined, undefined]), store: null };
+      noteSubmitted(paneId, current.text, current);
+      const shown = await served(paneId);
+      expect(shown.prompt).toMatchObject({ agent: "claude", title: "Goal active", options: [{ label: "Close" }] });
+      expect(shown.outcomes?.at(-1)).toMatchObject({ id: "goal-send", state: "interaction-required" });
+      expect(current.dialogId).toBe(shown.prompt!.id);
+      // a form naming another reader's dialog is not waiting on this card
+      const other = { ...current, id: "other-send", form: { match: "bare" as const, interaction: "dialog" as const, dialog: "claude-model" }, outcome: undefined, dialogId: undefined };
+      noteSubmitted(paneId, other.text, other);
+      expect((await served(paneId)).outcomes?.at(-1)).toMatchObject({ id: "other-send", state: "accepted" });
+    });
+  });
+});
 
 describe("registered result evidence", () => {
   const anchor = "fixture-tail-1\nfixture-tail-2\nfixture-tail-3";

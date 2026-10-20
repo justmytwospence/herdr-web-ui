@@ -309,6 +309,8 @@ function promptTailIsActive(prompt: ParsedPrompt, screen: string): boolean {
   if (prompt.responder === "claude-confirm") return ends(CLAUDE_CONFIRM_HINT_RE);
   // its parser already found the hint over the input box with only the footer under it
   if (prompt.responder === "claude-held") return true;
+  // the goal dialog ends the screen with its own dismiss hint
+  if (prompt.responder === "claude-goal") return ends(/esc to dismiss$/i);
   if (prompt.responder === "claude-model") return claudeModelListWaits(screen);
   if (prompt.responder === "claude-effort") return ends(CLAUDE_EFFORT_HINT_RE);
   if (prompt.responder === "codex-model") return ends(/(?:^|\s)enter select\s*·\s*esc back$|(?:^|\s)enter (?:default|apply)\s*·\s*s session\s*·\s*esc back$/i);

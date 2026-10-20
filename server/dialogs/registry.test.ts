@@ -12,6 +12,7 @@ const snapshot: Record<string, readonly [DialogReader["reread"], DialogReader["l
   "claude-model": ["before-commit", "letter-window"],
   "claude-effort": ["before-commit", "slider"],
   "claude-held": ["none", "none"],
+  "claude-goal": ["before-commit", "none"],
   "codex-menu": ["none", "none"],
   "codex-question": ["none", "none"],
   "codex-async-question": ["none", "none"],
