@@ -215,6 +215,13 @@ describe("push delivery", () => {
     expect(received!.vapidClaims.sub).toBe("https://github.com/devswha/ovis");
   });
 
+  it("titles a seeded pane's alert with the format it was given", async () => {
+    const push = subscribed({ titleFormat: "{name} ({pc})" });
+    push.seed([{ ...pane("w1:p1", "working", "agent - api"), cwd: "/Users/me/api" }], "pc-a", "Work PC");
+    await push.onStatus("w1:p1", "done", "pc-a");
+    expect(fake.received.map((r) => r.payload.title)).toEqual(["api (Work PC)"]);
+  });
+
   it("keeps equal pane IDs, titles, status baselines and push links separated by PC", async () => {
     const push = subscribed();
     push.seed([pane("w1:p1", "working", "alpha")], "pc-a", "Work PC");

@@ -27,6 +27,21 @@ export function paneTitle(pane: Pick<PaneInfo, "pane_id" | "cwd" | "terminal_tit
   return pane.terminal_title_stripped ?? pane.terminal_title ?? pane.cwd ?? pane.pane_id;
 }
 
+/**
+ * An alert's title. Unset `format`: "<PC> · <pane title>", or the pane title alone for this
+ * server's own panes (no `machineName`). A format (OVIS_ALERT_TITLE) fills `{name}`
+ * (the pane's label, else its agent's folder, else `{title}`), `{title}` (paneTitle) and
+ * `{pc}` (the PC's name), for example "{name} ({pc})" for "api (Work PC)".
+ */
+export function alertTitle(pane: Pick<PaneInfo, "pane_id" | "cwd" | "foreground_cwd" | "label" | "terminal_title" | "terminal_title_stripped">, machineName?: string, format?: string): string {
+  const title = paneTitle(pane);
+  if (!format) return machineName ? `${machineName} · ${title}` : title;
+  const folder = (pane.foreground_cwd || pane.cwd || "").split(/[\\/]+/).filter((part) => part !== "").at(-1);
+  const name = pane.label?.trim() || folder || title;
+  const fields: Record<string, string> = { name, title, pc: machineName ?? "" };
+  return format.replace(/\{(name|title|pc)\}/g, (_, key: string) => fields[key]!);
+}
+
 const STATUS_BODY: Readonly<Record<string, string>> = {
   blocked: "waiting for your input",
   done: "work finished",
