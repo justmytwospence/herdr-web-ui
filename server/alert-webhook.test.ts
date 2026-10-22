@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { AgentStatus, HerdrPane } from "../shared/protocol.ts";
-import { createAlertWebhook, handleAlertWebhookRequest, type AlertWebhook } from "./alert-webhook.ts";
+import { alertText, createAlertWebhook, handleAlertWebhookRequest, type AlertWebhook } from "./alert-webhook.ts";
 import { createPushService } from "./push.ts";
 
 interface Received { path: string; headers: Headers; body: string }
@@ -299,6 +299,20 @@ describe("web push alerts reach the webhook", () => {
     inUse = true;
     await step(() => push.onStatus("w1:p1", "blocked"));
     expect(destination.received).toHaveLength(3);
+  });
+
+  it("names the PC once when OVIS_ALERT_TITLE already titles the alert", async () => {
+    expect(alertText({ title: "api · NUC", body: "waiting for your input", pc: "NUC", titled: true })).toBe("api · NUC: waiting for your input");
+    expect(alertText({ title: "api · NUC", body: "waiting for your input", pc: "NUC" })).toBe("NUC · api · NUC: waiting for your input");
+    const hook = webhook();
+    hook.save({ preset: "json", url: destination.url() }, undefined);
+    const push = createPushService({ stateDir, localName: "NUC", titleFormat: "{name} · {pc}", timing: { short: 0, long: 0, longTurn: 0 }, webhook: hook });
+    push.seed([{ ...pane("w1:p1", "working"), label: "api" }], "local", "NUC");
+    await push.onStatus("w1:p1", "blocked");
+    await push.settled();
+    await hook.settled();
+    expect(destination.received).toHaveLength(1);
+    expect(JSON.parse(destination.received[0]!.body).text).toBe("api · NUC: waiting for your input");
   });
 
   it("does not tell a destination set after the alert arose", async () => {

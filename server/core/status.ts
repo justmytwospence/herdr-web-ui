@@ -3,10 +3,11 @@
  * own status, background waits, plans, the machine roster and the one collector that feeds them.
  */
 import { createAlertWebhook } from "../alert-webhook.ts";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import type { RelaySocket } from "../../shared/relay-channel.ts";
 import type { AgentStatus, HerdrPane, PlanSummary, ServerMessage, SessionSnapshot } from "../../shared/protocol.ts";
-import { alertStatus, paneAlertsMuted, paneTitle } from "../../shared/notify-policy.ts";
+import { alertStatus, alertTitle, paneAlertsMuted } from "../../shared/notify-policy.ts";
 import { BackgroundWait } from "../background-wait.ts";
 import { busyPanes, DESKTOP_ACTIVITY_FILE, trackDesktopActivity } from "../desktop-activity.ts";
 import { ClaudeSubagentStatus } from "../claude-subagents.ts";
@@ -91,7 +92,10 @@ export function createStatusHub<Owner, Lease>({ options, devices, preferences, c
 }) {
   const canDeliver = (id: string | null | undefined): boolean => id === null || (id === undefined ? !devices.gated : devices.has(id));
   const alertWebhook = createAlertWebhook({ stateDir: options.stateDir ?? defaultStateDir(), canDeliver });
+  // OVIS_ALERT_TITLE: a format names this PC's own panes after its hostname, as the PC list does
+  const alertTitleFormat = process.env["OVIS_ALERT_TITLE"]?.trim() || undefined;
   const push = createPushService({
+    titleFormat: alertTitleFormat,
     stateDir: options.stateDir ?? defaultStateDir(),
     webhook: alertWebhook,
     serverId: options.serverId,
@@ -107,8 +111,8 @@ export function createStatusHub<Owner, Lease>({ options, devices, preferences, c
     muted: (machineId, paneId) => paneAlertsMuted(preferences.get().muted_panes, machineId, paneId),
     // on herdr-core the pane carries what a blocked agent waits for (server/herdr-core/snapshot.ts reportedFacts)
     lookupPane: async (paneId) => {
-      const pane: Pick<HerdrPane, "agent_kind"> & Parameters<typeof paneTitle>[0] = await paneGet(paneId);
-      return { title: paneTitle(pane), ...(pane.agent_kind ? { agent_kind: pane.agent_kind } : {}) };
+      const pane: Pick<HerdrPane, "agent_kind"> & Parameters<typeof alertTitle>[0] = await paneGet(paneId);
+      return { title: alertTitle(pane, alertTitleFormat ? hostname() : undefined, alertTitleFormat), ...(pane.agent_kind ? { agent_kind: pane.agent_kind } : {}) };
     },
     // each pane alert that reached a device, for the daily active message's usage
     onAlertDelivered: () => options.telemetry?.tally("alerts_delivered"),
@@ -565,7 +569,7 @@ export function createStatusHub<Owner, Lease>({ options, devices, preferences, c
       const projected = panes.map((pane) => ({ ...pane, agent_status: restingClaude(pane.pane_id, pane.agent, pane.agent_status) }));
       // A resting baseline never reholds old work after a bridge restart.
       for (const pane of projected) if (pane.agent === "claude" || pane.agent === "opencode") waits.seed(pane.pane_id, pane.agent_status);
-      push.seed(projected.map((pane) => ({ ...pane, agent_status: alertStatus(pane.agent_status, waits.waiting(pane.pane_id)) })));
+      push.seed(projected.map((pane) => ({ ...pane, agent_status: alertStatus(pane.agent_status, waits.waiting(pane.pane_id)) })), "local", alertTitleFormat ? hostname() : undefined);
       for (const pane of projected) {
         // A fast mirrored client may queue before the collector's first baseline. A
         // known ready baseline can schedule a fresh guarded check even when the tracker

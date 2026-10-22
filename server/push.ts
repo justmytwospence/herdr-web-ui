@@ -74,7 +74,7 @@ import {
   ERROR_NOTIFICATION_BODY,
   PERMISSION_NOTIFICATION_BODY,
   paneNotificationTag,
-  paneTitle,
+  alertTitle,
   parseAlerts,
   shouldNotifyStatus,
   statusNotificationBody,
@@ -220,6 +220,8 @@ export interface PushService {
 export interface PushServiceOptions {
   stateDir: string;
   subject?: string;
+  /** How alert titles read (shared/notify-policy.ts alertTitle); unset, "<PC> · <pane title>". */
+  titleFormat?: string;
   /**
    * The pane as herdr has it now, looked up when an alert fires: its title, and what a blocked agent
    * waits for. Falls back to what was last seeded.
@@ -807,6 +809,7 @@ export function createPushService(options: PushServiceOptions): PushService {
       ...(machineId === "local" ? { pc: pcKeys(machineId)[0] } : { machine_id: machineId }),
       ...(workspace ? { workspace_id: workspace } : {}),
       ...(generation === undefined ? {} : { generation }),
+      ...(options.titleFormat ? { titled: true } : {}),
     });
   }
 
@@ -960,7 +963,7 @@ export function createPushService(options: PushServiceOptions): PushService {
       for (const pane of panes) {
         // only fill gaps: an event already seen is newer than any snapshot
         const key = paneStorageId(machineId, pane.pane_id);
-        titles.set(key, `${machineName ? machineName + " · " : ""}${paneTitle(pane)}`);
+        titles.set(key, alertTitle(pane, machineName, options.titleFormat));
         workspaces.set(key, pane.workspace_id);
         if (pane.agent_kind) kinds.set(key, pane.agent_kind); else kinds.delete(key);
         if (!lastStatus.has(key)) lastStatus.set(key, pane.agent_status);

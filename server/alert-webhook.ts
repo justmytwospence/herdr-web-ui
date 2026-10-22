@@ -54,6 +54,8 @@ export interface WebhookAlert {
   pane_id: string;
   machine_id?: string;
   workspace_id?: string;
+  /** the title is OVIS_ALERT_TITLE's whole title: the text adds no PC name of its own */
+  titled?: boolean;
   /** whether the alert is still news (the pane unchanged, not muted, no window in use): asked before each try */
   current?: () => boolean;
   /** the destination's `generation()` when the alert arose: a destination set since is not told it */
@@ -145,8 +147,8 @@ export function paneLink(base: string | undefined, alert: Pick<WebhookAlert, "pa
 }
 
 /** The one line a chat shows: "Work PC · codex: waiting for your input". */
-export function alertText(alert: Pick<WebhookAlert, "title" | "body" | "pc">): string {
-  return `${alert.pc ? `${alert.pc} · ` : ""}${alert.title}: ${alert.body}`;
+export function alertText(alert: Pick<WebhookAlert, "title" | "body" | "pc" | "titled">): string {
+  return `${alert.pc && !alert.titled ? `${alert.pc} · ` : ""}${alert.title}: ${alert.body}`;
 }
 
 interface Post { url: string; init: RequestInit }
