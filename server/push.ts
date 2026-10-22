@@ -77,7 +77,7 @@ import {
   ERROR_NOTIFICATION_BODY,
   PERMISSION_NOTIFICATION_BODY,
   paneNotificationTag,
-  pushPaneTitle,
+  alertTitle,
   parseAlerts,
   shouldNotifyStatus,
   statusNotificationBody,
@@ -238,6 +238,8 @@ export interface PushService {
 export interface PushServiceOptions {
   stateDir: string;
   subject?: string;
+  /** How alert titles read (shared/notify-policy.ts alertTitle); unset, "<PC> · <pane title>". */
+  titleFormat?: string;
   lookupPane?: (paneId: string) => Promise<{ title: string; agent_kind?: string } | undefined>;
   lookupPrompt?: (paneId: string, signal: AbortSignal) => Promise<{ prompt: InteractivePrompt; screen?: string } | null>;
   /** whether a subscription's device may answer a prompt (not one paired to watch only): only it gets the buttons */
@@ -1023,7 +1025,7 @@ export function createPushService(options: PushServiceOptions): PushService {
       if (serverId) pcIds.set(machineId, serverId);
       for (const pane of panes) {
         const key = paneStorageId(machineId, pane.pane_id);
-        titles.set(key, `${machineName ? machineName + " · " : ""}${pushPaneTitle(pane)}`);
+        titles.set(key, alertTitle(pane, machineName, options.titleFormat));
         workspaces.set(key, pane.workspace_id);
         if (pane.agent_kind) kinds.set(key, pane.agent_kind); else kinds.delete(key);
         if (!lastStatus.has(key)) lastStatus.set(key, pane.agent_status);

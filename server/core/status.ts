@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import type { TailnetPcsOptions } from "../tailnet-pcs.ts";
 import type { SshCandidatesOptions } from "../ssh-candidates.ts";
 import { createAlertWebhook } from "../alert-webhook.ts";
@@ -5,7 +6,7 @@ import { stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { RelaySocket } from "../../shared/relay-channel.ts";
 import type { AgentStatus, HerdrPane, PaneContext, PlanSummary, ServerMessage, SessionSnapshot } from "../../shared/protocol.ts";
-import { alertStatus, paneAlertsMuted, pushPaneTitle } from "../../shared/notify-policy.ts";
+import { alertStatus, alertTitle, paneAlertsMuted, pushPaneTitle } from "../../shared/notify-policy.ts";
 import { AgentTaskStatus, isTaskAgent } from "../agent-tasks.ts";
 import { resolveAgyStore } from "../agy-store.ts";
 import { BackgroundWait } from "../background-wait.ts";
@@ -110,7 +111,10 @@ export function createStatusHub<Owner, Lease>({ options, devices, preferences, c
 }) {
   const canDeliver = (id: string | null | undefined): boolean => id === null || (id === undefined ? !devices.gated : devices.has(id));
   const alertWebhook = createAlertWebhook({ stateDir: options.stateDir ?? defaultStateDir(), canDeliver });
+  // OVIS_ALERT_TITLE: a format names this PC's own panes after its hostname, as the PC list does
+  const alertTitleFormat = process.env["OVIS_ALERT_TITLE"]?.trim() || undefined;
   const push = createPushService({
+    titleFormat: alertTitleFormat,
     stateDir: options.stateDir ?? defaultStateDir(),
     webhook: alertWebhook,
     serverId: options.serverId,
@@ -125,10 +129,10 @@ export function createStatusHub<Owner, Lease>({ options, devices, preferences, c
     inUse: () => present.size > 0,
     muted: (machineId, paneId) => paneAlertsMuted(preferences.get().muted_panes, machineId, paneId),
     lookupPane: async (paneId) => {
-      const pane: Pick<HerdrPane, "agent_kind"> & Parameters<typeof pushPaneTitle>[0] = await paneGet(paneId);
+      const pane: Pick<HerdrPane, "agent_kind" | "foreground_cwd"> & Parameters<typeof pushPaneTitle>[0] = await paneGet(paneId);
       // or what the card it waits on asks, where the agent itself did not say (server/card-waits.ts)
       const kind = pane.agent_kind ?? cards.kindOf(paneId) ?? undefined;
-      return { title: pushPaneTitle(pane), ...(kind ? { agent_kind: kind } : {}) };
+      return { title: alertTitle(pane, alertTitleFormat ? hostname() : undefined, alertTitleFormat), ...(kind ? { agent_kind: kind } : {}) };
     },
     onAlertDelivered: () => options.telemetry?.tally("alerts_delivered"),
   });
@@ -838,7 +842,7 @@ export function createStatusHub<Owner, Lease>({ options, devices, preferences, c
         const began = created.get(pane.pane_id);
         if (began !== undefined) push.firstStatus(pane.pane_id, began, pane.agent_status).catch(logPushError);
       }
-      push.seed(alerted);
+      push.seed(alerted, "local", alertTitleFormat ? hostname() : undefined);
       // a tab, workspace or worktree that closed names none of its panes: the snapshot without them says they went
       push.gone(projected, newer);
       for (const pane of projected) {
