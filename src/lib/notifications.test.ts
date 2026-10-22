@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { AgentStatus } from "../../shared/protocol.ts";
-import { alertStatus, alertsAllow, shouldNotifyStatus, showPaneEndedNotification, showPaneStatusNotification } from "./notifications.ts";
+import { alertStatus, alertsAllow, clearWorkspaceNotifications, shouldNotifyStatus, showPaneEndedNotification, showPaneStatusNotification } from "./notifications.ts";
 
 describe("alertStatus", () => {
   it("takes a pane at rest that waits on its turn's background work for working, and leaves the rest as they are", () => {
@@ -78,9 +78,63 @@ describe("tab alerts shown through the worker", () => {
     showPaneStatusNotification("w3:p1", "Mac · codex", "done", undefined, "local");
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(shown.map((entry) => entry.data)).toEqual([
-      { pane_id: "w1:p9", machine_id: "local", workspace_id: "w1" },
-      { pane_id: "w2:p1", machine_id: "pc-2", workspace_id: "w2" },
-      { pane_id: "w3:p1", machine_id: "local" },
+      { pane_id: "w1:p9", machine_id: "local", workspace_id: "w1", alert_id: expect.any(String) },
+      { pane_id: "w2:p1", machine_id: "pc-2", workspace_id: "w2", alert_id: expect.any(String) },
+      { pane_id: "w3:p1", machine_id: "local", alert_id: expect.any(String) },
     ]);
+  });
+
+  type Data = { pane_id?: string; machine_id?: string; workspace_id?: string; alert_id?: string };
+  /** What iOS shows: one notification per show, whatever the tag, each closed on its own. */
+  function iosCentre() {
+    let delivered: Array<{ tag: string; data: Data; close: () => void }> = [];
+    const add = (tag: string, data: Data): void => {
+      const notification = { tag, data, close: () => { delivered = delivered.filter((other) => other !== notification); } };
+      delivered.push(notification);
+    };
+    (globalThis as { Notification?: unknown }).Notification = { permission: "granted" };
+    Object.defineProperty(globalThis, "document", { configurable: true, value: { hidden: true } });
+    const registration = {
+      active: {},
+      showNotification: async (_title: string, options: { tag: string; data: Data }) => add(options.tag, options.data),
+      getNotifications: async (filter?: { tag?: string }) => delivered.filter((notification) => !filter?.tag || notification.tag === filter.tag),
+    };
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: { serviceWorker: { getRegistration: async () => registration } } });
+    return { delivered: () => delivered.map((notification) => `${notification.data.machine_id ?? "local"} ${notification.data.pane_id}`) };
+  }
+
+  it("closes the pane's earlier alert, as a push does, and no other pane's", async () => {
+    const centre = iosCentre();
+    await showPaneStatusNotification("w1:p1", "Mac · codex", "blocked", undefined, "local", "w1");
+    await showPaneStatusNotification("w1:p2", "Mac · codex", "blocked", undefined, "local", "w1");
+    await showPaneStatusNotification("w1:p1", "Mac · codex", "blocked", undefined, "pc-2", "w1");
+    await showPaneStatusNotification("w1:p1", "Mac · codex", "done", undefined, "local", "w1");
+    expect(centre.delivered()).toEqual(["local w1:p2", "pc-2 w1:p1", "local w1:p1"]);
+  });
+
+  it("clears on view the alerts of the workspace on screen, and no other", async () => {
+    type Data = { pane_id: string; machine_id?: string; workspace_id?: string | null };
+    let delivered: Array<{ data: Data; close: () => void }> = [];
+    for (const data of [
+      { pane_id: "w1:p1", machine_id: "local", workspace_id: "w1" },
+      { pane_id: "w1:p2", workspace_id: "w1" }, // a push names no machine for the server's own PC
+      { pane_id: "w2:p1", machine_id: "local", workspace_id: "w2" },
+      { pane_id: "w1:p1", machine_id: "pc-2", workspace_id: "w1" },
+      { pane_id: "w1:p3", machine_id: "local", workspace_id: null },
+    ] as Data[]) {
+      const notification = { data, close: () => { delivered = delivered.filter((other) => other !== notification); } };
+      delivered.push(notification);
+    }
+    const registration = { getNotifications: async () => delivered };
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: { serviceWorker: { getRegistration: async () => registration } } });
+    await clearWorkspaceNotifications("local", "w1");
+    expect(delivered.map(({ data }) => `${data.machine_id ?? "local"} ${data.pane_id}`)).toEqual(["local w2:p1", "pc-2 w1:p1", "local w1:p3"]);
+  });
+
+  it("clears nothing, and throws nothing, without a worker or getNotifications", async () => {
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: {} });
+    await clearWorkspaceNotifications("local", "w1");
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: { serviceWorker: { getRegistration: async () => ({}) } } });
+    await clearWorkspaceNotifications("local", "w1");
   });
 });

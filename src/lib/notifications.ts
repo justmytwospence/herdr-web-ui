@@ -35,11 +35,17 @@ async function show(paneId: string, title: string, body: string, onClick?: () =>
   if (typeof globalThis.Notification === "undefined") return;
   if (globalThis.Notification.permission !== "granted") return;
   if (typeof document !== "undefined" && !document.hidden) return; // visible tab: the UI already shows it
-  const options: NotificationOptions = { body, tag: paneNotificationTag(paneId, machineId), data: { pane_id: paneId, machine_id: machineId, ...(workspaceId ? { workspace_id: workspaceId } : {}) }, icon: "/icons/icon-192.png?v=sheep1" };
+  const tag = paneNotificationTag(paneId, machineId);
+  const alertId = crypto.randomUUID();
+  const options: NotificationOptions = { body, tag, data: { pane_id: paneId, machine_id: machineId, ...(workspaceId ? { workspace_id: workspaceId } : {}), alert_id: alertId }, icon: "/icons/icon-192.png?v=sheep1" };
   try {
     const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : undefined;
     if (registration?.active) {
       await registration.showNotification(title, options);
+      // iOS keeps the pane's earlier alerts despite the tag: close them as a push does (public/sw.js)
+      for (const older of await registration.getNotifications({ tag })) {
+        if ((older.data as { alert_id?: string } | null)?.alert_id !== alertId) older.close();
+      }
       return;
     }
     const notification = new globalThis.Notification(title, options);
@@ -52,11 +58,29 @@ async function show(paneId: string, title: string, body: string, onClick?: () =>
   }
 }
 
-/** `workspaceId`: the pane's workspace, as the server's push names it (server/push.ts), so a tap after the pane ends opens it. */
-export function showPaneStatusNotification(paneId: string, title: string, status: AgentStatus, onClick?: () => void, machineId = "local", workspaceId?: string): void {
-  void show(paneId, title, statusNotificationBody(status), onClick, machineId, workspaceId);
+/**
+ * The workspace on screen has been seen: close the delivered alerts (pushed or shown by a
+ * tab) about its panes, by the machine and workspace they name, and leave the rest. Native
+ * apps clear what was read; on iOS nothing else does, and it refuses to close an alert for
+ * 30 s after showing it.
+ */
+export async function clearWorkspaceNotifications(machineId: string, workspaceId: string): Promise<void> {
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration();
+    for (const notification of (await registration?.getNotifications()) ?? []) {
+      const data = notification.data as { machine_id?: string; workspace_id?: string | null } | null;
+      if ((data?.machine_id || "local") === machineId && data?.workspace_id === workspaceId) notification.close();
+    }
+  } catch {
+    /* no worker or no getNotifications here: nothing to clear */
+  }
 }
 
-export function showPaneEndedNotification(paneId: string, title: string, onClick?: () => void, machineId = "local", workspaceId?: string): void {
-  void show(paneId, title, ENDED_NOTIFICATION_BODY, onClick, machineId, workspaceId);
+/** `workspaceId`: the pane's workspace, as the server's push names it (server/push.ts), so a tap after the pane ends opens it. */
+export function showPaneStatusNotification(paneId: string, title: string, status: AgentStatus, onClick?: () => void, machineId = "local", workspaceId?: string): Promise<void> {
+  return show(paneId, title, statusNotificationBody(status), onClick, machineId, workspaceId);
+}
+
+export function showPaneEndedNotification(paneId: string, title: string, onClick?: () => void, machineId = "local", workspaceId?: string): Promise<void> {
+  return show(paneId, title, ENDED_NOTIFICATION_BODY, onClick, machineId, workspaceId);
 }

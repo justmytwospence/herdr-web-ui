@@ -43,7 +43,7 @@ import {
   DEFAULT_ALERTS,
   ENDED_NOTIFICATION_BODY,
   paneNotificationTag,
-  paneTitle,
+  alertTitle,
   parseAlerts,
   shouldNotifyStatus,
   statusNotificationBody,
@@ -115,6 +115,8 @@ export interface PushService {
 export interface PushServiceOptions {
   stateDir: string;
   subject?: string;
+  /** How alert titles read (shared/notify-policy.ts alertTitle); unset, "<PC> · <pane title>". */
+  titleFormat?: string;
   /** Current title of a pane, looked up when an alert fires; falls back to the last seeded one. */
   lookupTitle?: (paneId: string) => Promise<string | undefined>;
   timing?: Partial<AlertTiming>;
@@ -418,7 +420,7 @@ export function createPushService(options: PushServiceOptions): PushService {
       for (const pane of panes) {
         // only fill gaps: an event already seen is newer than any snapshot
         const key = paneStorageId(machineId, pane.pane_id);
-        titles.set(key, `${machineName ? machineName + " · " : ""}${paneTitle(pane)}`);
+        titles.set(key, alertTitle(pane, machineName, options.titleFormat));
         workspaces.set(key, pane.workspace_id);
         if (!lastStatus.has(key)) lastStatus.set(key, pane.agent_status);
       }

@@ -306,6 +306,10 @@ While the app is in front on any device, its window visible and focused, no aler
 device: you are already looking at the change. Alerts resume once no window of the app is in use.
 The test push is always sent.
 
+Each pane keeps one alert: a new one replaces its last. iOS lets an alert be removed only
+30 seconds after it arrived, so a quicker repeat stays until the pane's next alert.
+Opening the app on a workspace clears that workspace's alerts.
+
 On a phone:
 - Agent panes open in the chat.
 - The terminal gets a key bar above the keyboard (Esc, Tab, Ctrl+C, Ctrl, Alt, Shift, Enter, arrows).
@@ -495,6 +499,7 @@ Each `OVIS_*` variable was called `HERDR_WEB_*` before Ovis took its name (`OVIS
 | `OVIS_AUTO_UPDATE` | `0` | `1` installs new releases without asking |
 | `OVIS_TELEMETRY` | unset (on) | `0` sends no [anonymous usage counts](#anonymous-usage-counts), whatever the switch in Settings says. `DO_NOT_TRACK=1` does the same |
 | `OVIS_PUSH_SUBJECT` | this repository's URL | VAPID contact URL or `mailto:` address |
+| `OVIS_ALERT_TITLE` | unset (`<PC> · <pane title>`) | How the title of a pushed alert reads: `{name}` is the pane's name or else its agent's folder, `{title}` the pane title, `{pc}` the PC's name (this PC's hostname for its own panes). `{name} ({pc})` reads `api (Work PC)` |
 | `OVIS_BUNDLE_MANIFEST` | unset | Remote-PC bundle manifest (path or URL) that overrides local and published bundles |
 | `OVIS_HERDR_BIN` | `herdr` | herdr executable used for terminal attach |
 | `OVIS_APP_NAME` | unset (`Ovis`) | The name the installed app has on a phone or computer, for example the PC's name. Each PC installs as an app of its own, and without it they are all called `Ovis`. An app already installed takes the new name when the browser next updates it, usually within a day or two, without a reinstall. Keep it short: a home screen cuts a long label |

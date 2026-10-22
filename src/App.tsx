@@ -67,8 +67,10 @@ import {
   alertsAllow,
   showPaneEndedNotification,
   showPaneStatusNotification,
+  clearWorkspaceNotifications,
   type NotificationState,
 } from "./lib/notifications.ts";
+import { watchPageInUse } from "./lib/presence.ts";
 import { ensurePushSubscription, pushSupported, removePushSubscription } from "./lib/push.ts";
 import { machineGone, notificationLanding, notificationTargetFromSearch, sameLink, notificationViewForPane, onNotificationTarget, type NotificationTarget } from "./lib/notificationTarget.ts";
 import { useUpdates } from "./lib/updates.ts";
@@ -1025,6 +1027,12 @@ export function App() {
   const selectedWorkspace = selectedPane
     ? (snapshot?.workspaces.find((workspace) => workspace.workspace_id === selectedPane.workspace_id) ?? null)
     : null;
+  // the workspace on screen, while the page is in use, has been seen: its alerts go
+  const viewedWorkspaceId = locked === false ? (selectedPane?.workspace_id ?? null) : null;
+  useEffect(() => {
+    if (!viewedWorkspaceId) return;
+    return watchPageInUse((inUse) => { if (inUse) void clearWorkspaceNotifications(selectedMachineId, viewedWorkspaceId); });
+  }, [selectedMachineId, viewedWorkspaceId]);
   const selectedLayout = snapshot?.layouts.find((layout) => layout.tab_id === selectedPane?.tab_id);
   // Selection can precede rendering: in a zoomed tab the layout effect below redirects it,
   // but the sidebar's passive effect can still see that first selection. Only the selected

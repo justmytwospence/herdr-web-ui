@@ -2,9 +2,10 @@
  * Pane status as clients and web push see it: the completion tracker, OmO's, GJC's and Claude's
  * own status, background waits, plans, the machine roster and the one collector that feeds them.
  */
+import { hostname } from "node:os";
 import { join } from "node:path";
 import type { AgentStatus, HerdrPane, PlanSummary, ServerMessage, SessionSnapshot } from "../../shared/protocol.ts";
-import { alertStatus, paneTitle } from "../../shared/notify-policy.ts";
+import { alertStatus, alertTitle } from "../../shared/notify-policy.ts";
 import { BackgroundWait } from "../background-wait.ts";
 import { ClaudeSubagentStatus } from "../claude-subagents.ts";
 import { codexOpenRollout, paneCodexHome } from "../codex.ts";
@@ -60,7 +61,10 @@ export function createStatusHub<Owner, Lease>({ options, devices, clients, prese
   usage: UsageService;
   usageLogin: UsageLoginService;
 }) {
+  // OVIS_ALERT_TITLE: a format names this PC's own panes after its hostname, as the PC list does
+  const alertTitleFormat = process.env["OVIS_ALERT_TITLE"]?.trim() || undefined;
   const push = createPushService({
+    titleFormat: alertTitleFormat,
     stateDir: options.stateDir ?? defaultStateDir(),
     timing: options.alertTiming,
     now: options.statusNow,
@@ -68,7 +72,7 @@ export function createStatusHub<Owner, Lease>({ options, devices, clients, prese
     canDeliver: (id) => id === null || (id === undefined ? !devices.gated : devices.has(id)),
     inUse: () => present.size > 0,
     lookupTitle: async (paneId) => {
-      return paneTitle(await paneGet(paneId));
+      return alertTitle(await paneGet(paneId), alertTitleFormat ? hostname() : undefined, alertTitleFormat);
     },
   });
 
@@ -312,7 +316,7 @@ export function createStatusHub<Owner, Lease>({ options, devices, clients, prese
     onBaseline: (panes) => {
       // A resting baseline never reholds old work after a bridge restart.
       for (const pane of panes) if (pane.agent === "claude") waits.seed(pane.pane_id, pane.agent_status);
-      push.seed(panes.map((pane) => ({ ...pane, agent_status: alertStatus(pane.agent_status, waits.waiting(pane.pane_id)) })));
+      push.seed(panes.map((pane) => ({ ...pane, agent_status: alertStatus(pane.agent_status, waits.waiting(pane.pane_id)) })), "local", alertTitleFormat ? hostname() : undefined);
       for (const pane of panes) {
         // A fast mirrored client may queue before the collector's first baseline. A
         // known ready baseline can schedule a fresh guarded check even when the tracker
