@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { AlertPrefs } from "../shared/notify-policy.ts";
 import type { AgentStatus, HerdrPane, SessionSnapshot } from "../shared/protocol.ts";
 import { CompletionTracker } from "./completion.ts";
-import { createPushService, handlePushRequest, parseSubscription, type PushService } from "./push.ts";
+import { createPushService, handlePushRequest, inputAlertTiming, parseSubscription, type PushService } from "./push.ts";
 import { startFakePushService, type FakePushService } from "./push.fake.ts";
 
 /**
@@ -341,9 +341,9 @@ describe("push delivery", () => {
 describe("alert timing and each device's choice", () => {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   /** real timers, short enough for a test; the clock that measures turns is ours to move */
-  function timed(alerts?: AlertPrefs) {
+  function timed(alerts?: AlertPrefs, input?: number) {
     let clock = 0;
-    const push = createPushService({ loopbackHttp: true, stateDir, timing: { short: 40, long: 80, longTurn: 1_000 }, now: () => clock });
+    const push = createPushService({ loopbackHttp: true, stateDir, timing: { short: 40, long: 80, longTurn: 1_000, input }, now: () => clock });
     push.subscribe(fake.subscription, alerts);
     push.seed([pane("w1:p1", "idle", "claude")]);
     return { push, advance: (ms: number) => { clock += ms; } };
@@ -382,6 +382,38 @@ describe("alert timing and each device's choice", () => {
     await push.onStatus("w1:p1", "blocked");
     await push.settled();
     expect(fake.received.map((r) => r.payload.body)).toEqual(["waiting for your input"]);
+  });
+
+  it("gives a question its own wait when one is set, and a finish keeps `short`", async () => {
+    const { push } = timed({ input: true, done: "always" }, 200);
+    await push.onStatus("w1:p1", "working");
+    await push.onStatus("w1:p1", "blocked");
+    // fixed wait: proves no alert goes out once `short` has passed, within the question's own wait
+    await sleep(80);
+    await push.onStatus("w1:p1", "working");
+    await push.settled();
+    expect(fake.received).toHaveLength(0);
+    await push.onStatus("w1:p1", "done");
+    await push.settled();
+    expect(fake.received.map((r) => r.payload.body)).toEqual(["work finished"]);
+    await push.onStatus("w1:p1", "blocked");
+    await push.settled();
+    expect(fake.received.map((r) => r.payload.body)).toEqual(["work finished", "waiting for your input"]);
+  });
+
+  it("reads HERDR_WEB_INPUT_ALERT_DELAY as whole seconds, and ignores anything else with a word", () => {
+    const warnings: string[] = [];
+    const warn = (message: string) => { warnings.push(message); };
+    for (const value of [undefined, "", "  "]) expect(inputAlertTiming(value, warn)).toEqual({});
+    expect(inputAlertTiming("30", warn)).toEqual({ input: 30_000 });
+    expect(inputAlertTiming(" 0 ", warn)).toEqual({ input: 0 });
+    expect(inputAlertTiming("86400", warn)).toEqual({ input: 86_400_000 });
+    expect(warnings).toEqual([]);
+    for (const value of ["abc", "-1", "1.5", "30s", "1e3", "86401"]) {
+      expect(inputAlertTiming(value, warn)).toEqual({});
+      expect(warnings.at(-1)).toContain(`HERDR_WEB_INPUT_ALERT_DELAY=${JSON.stringify(value)}`);
+    }
+    expect(warnings).toHaveLength(6);
   });
 
   it("tells a finish only after a turn that worked a while, and not one followed by the next prompt", async () => {

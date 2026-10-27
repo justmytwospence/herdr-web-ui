@@ -54,7 +54,7 @@ import {
   type PluginInvocationContext,
   sessionSnapshot,
 } from "./herdr/client.ts";
-import { type AlertTiming, createPushService, defaultStateDir, handlePushRequest } from "./push.ts";
+import { type AlertTiming, createPushService, defaultStateDir, handlePushRequest, inputAlertTiming } from "./push.ts";
 import { CLAUDE_CLEAR_INPUT_KEYS, claudeClearableDraft, claudeHeldIsGrey, claudeInputBoxContent, claudeInputDraft, hermesInputDraft, shownInputBox, claudeInputEmpty, viewportShowsLive, codexQuestionsCollapsed, handlePromptRequest, isClaudeHeld, heldCandidate, modelListWaits, noteSubmitted, parseInteractivePrompt, promptWaitEnded, claudeRestoredDraft, lastChatSubmitted } from "./prompt.ts";
 import { secretPrompt, validSecret } from "../shared/secret-prompt.ts";
 import { PtySession } from "./pty/session.ts";
@@ -1019,7 +1019,8 @@ export function createServer(
   }
   const push = createPushService({
     stateDir: options.stateDir ?? defaultStateDir(),
-    timing: options.alertTiming,
+    // a timing given (tests) stands as it is; the server's own takes HERDR_WEB_INPUT_ALERT_DELAY
+    timing: options.alertTiming ?? inputAlertTiming(process.env["HERDR_WEB_INPUT_ALERT_DELAY"]),
     now: options.statusNow,
     loopbackHttp: options.pushLoopbackHttp === true,
     canDeliver: (id) => id === null || (id === undefined ? !devices.gated : devices.has(id)),

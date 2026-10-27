@@ -21,9 +21,10 @@
  * off: a question answered at the desk, or a finish followed by the next prompt, never
  * reaches the phone. herdr says nothing of whether anyone is at the PC, so a change that
  * quick is taken for someone being there (as Claude Code waits ~6 s on a permission
- * prompt and ~60 s after a reply before it notifies). A question waits `short`; a finish
- * waits `long`, and only one after a turn that worked `longTurn` or more is worth it,
- * unless the device asked for every finish (which then waits `short`).
+ * prompt and ~60 s after a reply before it notifies). A question waits `short`, or `input`
+ * where HERDR_WEB_INPUT_ALERT_DELAY sets its own wait; a finish waits `long`, and only one after a
+ * turn that worked `longTurn` or more is worth it, unless the device asked for every finish
+ * (which then waits `short`).
  *
  * No device gets an alert while a window of the app is in use somewhere (`inUse`: a
  * connected page that is visible and has focus, which says so over its WebSocket): the
@@ -64,12 +65,33 @@ const RETIRED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export interface AlertTiming {
   /** a question, and a finish on a device that wants every one */
   short: number;
+  /** a question alone, when set (inputAlertTiming); unset, a question waits `short` */
+  input?: number;
   /** a finish after a long turn */
   long: number;
   /** the least a turn works for its finish to be worth an alert (`done: "long"`) */
   longTurn: number;
 }
 export const DEFAULT_ALERT_TIMING: AlertTiming = { short: 10_000, long: 60_000, longTurn: 60_000 };
+/** the most HERDR_WEB_INPUT_ALERT_DELAY takes, in seconds: a day, well within what a timer holds */
+const INPUT_ALERT_DELAY_LIMIT = 86_400;
+
+/**
+ * The timing HERDR_WEB_INPUT_ALERT_DELAY asks for: how many whole seconds a question waits before
+ * its alert goes out, for an answer at the desk to call it off (`AlertTiming.input`). Unset
+ * or empty, a question waits `short` as before. Anything else (a fraction, a unit, more than a
+ * day) is ignored, and `warn` says so.
+ */
+export function inputAlertTiming(value: string | undefined, warn: (message: string) => void = (message) => console.warn(message)): Partial<AlertTiming> {
+  const text = value?.trim() ?? "";
+  if (text === "") return {};
+  const seconds = /^\d+$/.test(text) ? Number(text) : NaN;
+  if (!(seconds <= INPUT_ALERT_DELAY_LIMIT)) {
+    warn(`HERDR_WEB_INPUT_ALERT_DELAY=${JSON.stringify(value)} is not a number of seconds up to ${INPUT_ALERT_DELAY_LIMIT}; a question waits the usual ${DEFAULT_ALERT_TIMING.short / 1000} s`);
+    return {};
+  }
+  return { input: seconds * 1000 };
+}
 
 export interface PushSubscriptionRecord {
   endpoint: string;
@@ -338,7 +360,7 @@ export function createPushService(options: PushServiceOptions): PushService {
 
   /** How long a device waits before this alert reaches it, or null: it does not want it. */
   function delayFor(prefs: AlertPrefs, status: AgentStatus, worked: number | null): number | null {
-    if (status === "blocked") return prefs.input ? timing.short : null;
+    if (status === "blocked") return prefs.input ? timing.input ?? timing.short : null;
     if (status !== "done" || prefs.done === "off") return null;
     if (prefs.done === "always") return timing.short;
     // a turn that began before this server knew the pane is of unknown length: tell it
