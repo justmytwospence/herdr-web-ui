@@ -1,4 +1,5 @@
 import type { AgentStatus } from "../../shared/protocol.ts";
+import { waitingOn } from "./waitToken.ts";
 
 export type KnownStatus = "idle" | "working" | "blocked" | "done" | "waiting" | "unknown";
 
@@ -40,11 +41,14 @@ export function knownStatus(status?: AgentStatus): KnownStatus {
 /**
  * What a pane reads as. One at rest while work its turn started still runs in the background
  * (`background_wait`, server/background-wait.ts) is waiting on it, and says BG in place of DONE
- * or READY: that work's end starts the next turn by itself.
+ * or READY: that work's end starts the next turn by itself. One working whose agent only waits on
+ * background work, as the wait token says (lib/waitToken.ts), says BG in place of RUN: a message
+ * reaches it now.
  */
-export function paneStatus(pane: { agent_status?: AgentStatus; background_wait?: true }): KnownStatus {
+export function paneStatus(pane: { agent_status?: AgentStatus; background_wait?: true; tokens?: Record<string, unknown> }): KnownStatus {
   const known = knownStatus(pane.agent_status);
-  return pane.background_wait && known !== "working" && known !== "blocked" ? "waiting" : known;
+  if (known === "working") return waitingOn(pane) === null ? known : "waiting";
+  return pane.background_wait && known !== "blocked" ? "waiting" : known;
 }
 
 /**

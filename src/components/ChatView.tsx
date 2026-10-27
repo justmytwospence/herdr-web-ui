@@ -140,6 +140,8 @@ export interface ChatViewProps {
   ended: boolean;
   agent: string | null;
   agentStatus?: AgentStatus;
+  /** what the working agent only waits on (lib/waitToken.ts): the activity line says so in place of Working; null otherwise */
+  waitingOn?: string | null;
   onMetadata?: (paneId: string, metadata: ConversationMetadata | null) => void;
   /** what the last read says of the conversation, for the composer's greeting; null while nothing is known (loading, a failed read, the chat gone) */
   onRead?: (paneId: string, read: ChatRead | null) => void;
@@ -467,7 +469,7 @@ function PendingWorkHead({ title, className = "" }: { title: string; className?:
   </div>;
 }
 
-function WorkBlockView({ paneId, parts, duration, live, waiting, defaultOpen, showThinking, pendingHead }: { paneId: string; parts: ConversationPart[]; duration: string | null; live: boolean; waiting: boolean; defaultOpen: boolean; showThinking: boolean; pendingHead: boolean }) {
+function WorkBlockView({ paneId, parts, duration, live, waiting, waitingOn, defaultOpen, showThinking, pendingHead }: { paneId: string; parts: ConversationPart[]; duration: string | null; live: boolean; waiting: boolean; waitingOn: string | null; defaultOpen: boolean; showThinking: boolean; pendingHead: boolean }) {
   const t = useT();
   const [chosenOpen, setOpen] = useChatRowToggle("work", null);
   const open = chosenOpen ?? defaultOpen;
@@ -475,11 +477,13 @@ function WorkBlockView({ paneId, parts, duration, live, waiting, defaultOpen, sh
   // must not take the rows from under the reader's focus or close the row they opened
   const keepOpen = () => { if (chosenOpen === null) setOpen(true); };
   const visible = visibleWorkParts(parts, showThinking);
-  if (visible.length === 0) return live && !waiting && pendingHead ? <PendingWorkHead title={t("Working…")} /> : null;
+  // the live head's words: Working, or what the agent only waits on (lib/waitToken.ts)
+  const working = waitingOn !== null ? t("Waiting on {what}…", { what: waitingOn }) : t("Working…");
+  if (visible.length === 0) return live && !waiting && pendingHead ? <PendingWorkHead title={working} /> : null;
   const summary = workSummary(parts);
   const failed = workFailed(parts);
   // a blocked agent is not working: the open block takes the sidebar's words for it
-  const title = waiting ? t("Needs you") : live ? t("Working…") : duration !== null ? t("Worked for {duration}", { duration }) : t("Worked");
+  const title = waiting ? t("Needs you") : live ? working : duration !== null ? t("Worked for {duration}", { duration }) : t("Worked");
   return <section className={`work-block${live ? " is-live" : ""}${waiting ? " is-waiting" : ""}${open ? "" : " is-folded"}`}>
     <button type="button" className="work-block-head" aria-expanded={open} onClick={() => setOpen(!open)}>
       <span className="work-row-caret" aria-hidden="true">{open ? <ChevronDown /> : <ChevronRight />}</span>
@@ -613,6 +617,8 @@ interface TurnProps {
   live: boolean;
   /** ...and "Needs you" while the agent is blocked */
   waiting: boolean;
+  /** ...and "Waiting on {what}…" while the agent only waits on background work (lib/waitToken.ts) */
+  waitingOn?: string | null;
   showThinking: boolean;
   /** the pane's skill names: an answer's text chips them */
   skills?: SkillMatcher | null;
@@ -689,7 +695,7 @@ function noticeLabel(t: ReturnType<typeof useT>, notice: Extract<ConversationPar
 }
 
 // a turn that did not change keeps its object across polls: skip re-rendering it
-const Turn = memo(function Turn({ paneId, turn, live, waiting, showThinking, skills = null, userSkills = null }: TurnProps) {
+const Turn = memo(function Turn({ paneId, turn, live, waiting, waitingOn = null, showThinking, skills = null, userSkills = null }: TurnProps) {
   const t = useT();
   // under the turn, not in its meta row: that row fades out once the pointer and focus leave
   const [copyFailed, setCopyFailed] = useChatRowToggle("copy-failed", false);
@@ -750,7 +756,7 @@ const Turn = memo(function Turn({ paneId, turn, live, waiting, showThinking, ski
     <SkillActivityList parts={turn.parts} />
     {goal !== null && <GoalActivity goal={goal} />}
     {/* the pending head stands only above no answer: one above words would leave a gap when the turn ends */}
-    {(work.length > 0 || (live && answer.length === 0)) && <WorkBlockView paneId={paneId} parts={work} duration={formatWorkDuration(turn.ts, turn.end_ts ?? null)} live={live} waiting={waiting} defaultOpen={workStartsOpen(live, turn.parts)} showThinking={showThinking} pendingHead={answer.length === 0} />}
+    {(work.length > 0 || (live && answer.length === 0)) && <WorkBlockView paneId={paneId} parts={work} duration={formatWorkDuration(turn.ts, turn.end_ts ?? null)} live={live} waiting={waiting} waitingOn={waitingOn} defaultOpen={workStartsOpen(live, turn.parts)} showThinking={showThinking} pendingHead={answer.length === 0} />}
     {answer.map((part, index) => <Markdown key={index} skills={skills}>{part.text}</Markdown>)}
     {answerText.length > 0 && <div className="chat-turn-meta chat-agent-meta">
       {/* a mouse reads one copy glyph and the words "Plain text"; touch reads the two formats */}
@@ -804,7 +810,7 @@ function TerminalFallback({ paneId, visible }: { paneId: string; visible: boolea
 }
 
 // the app re-renders on every pane-status and poll; an unchanged transcript sits those out
-export const ChatView = memo(function ChatView({ paneId, active = true, visible: paneVisible = true, pageScroll, refreshKey, invalidationKey = 0, onConversationWatch, conversationPushes = false, onTerminalOutput, sentKey = 0, connected, ended, agent, agentStatus, onMetadata, onRead, greeted = false, onPrompt, onSuggestion, onRestored, promptRefreshKey = 0, pendingAnswer = null, onPendingAnswerDone, promptDock = null, onPromptAnswered, title = null }: ChatViewProps) {
+export const ChatView = memo(function ChatView({ paneId, active = true, visible: paneVisible = true, pageScroll, refreshKey, invalidationKey = 0, onConversationWatch, conversationPushes = false, onTerminalOutput, sentKey = 0, connected, ended, agent, agentStatus, waitingOn = null, onMetadata, onRead, greeted = false, onPrompt, onSuggestion, onRestored, promptRefreshKey = 0, pendingAnswer = null, onPendingAnswerDone, promptDock = null, onPromptAnswered, title = null }: ChatViewProps) {
   const t = useT();
   const { fetchPaneConversation, peekPaneConversation, fetchPanePromptState, fetchPaneTranscript } = useMachineApi();
   const { settings } = useSettings();
@@ -1445,9 +1451,9 @@ export const ChatView = memo(function ChatView({ paneId, active = true, visible:
     const { turn } = row;
     const live = isLiveWorkTurn(turn, index === shownTurns.length - 1, workStatus, finishedBeforeSend);
     return <RenderBoundary resetKey={turnRevision(turn, true)} fallback={() => <p className="chat-inline-state chat-inline-error">{t("This message can't be shown here. The terminal has it.")}</p>}>
-      <Turn paneId={paneId} turn={turn} live={live} waiting={isWaitingWorkTurn(live, agentStatus)} showThinking={settings.showThinking} skills={skillMatcher} userSkills={skillMatcher} />
+      <Turn paneId={paneId} turn={turn} live={live} waiting={isWaitingWorkTurn(live, agentStatus)} waitingOn={live ? waitingOn : null} showThinking={settings.showThinking} skills={skillMatcher} userSkills={skillMatcher} />
     </RenderBoundary>;
-  }, [shownTurns.length, workStatus, finishedBeforeSend, t, paneId, agentStatus, settings.showThinking, skillMatcher]);
+  }, [shownTurns.length, workStatus, finishedBeforeSend, t, paneId, agentStatus, waitingOn, settings.showThinking, skillMatcher]);
   // displayPaneTitle falls back to the pane id for a pane with nothing else to call it
   const shownTitle = title?.trim() ?? "";
   const logLabel = shownTitle !== "" && shownTitle !== paneId ? t("conversation of {pane}", { pane: shownTitle }) : t("Conversation");
@@ -1490,15 +1496,15 @@ export const ChatView = memo(function ChatView({ paneId, active = true, visible:
       {/* The agent's activity, where no open work block says it: before the turn has an assistant or
           tool row (Claude Code's spinner writes nothing to the transcript), and while a native turn
           thinks (a work block's head says Working). Without native activity the pane status stands
-          in. One Working at a time. */}
+          in. One Working at a time. An agent that only waits on background work says what on. */}
       {connected && !ended && activity !== "idle" && agentStatus !== "blocked" && prompt === null && (activity === "thinking" || !workBlockLive) && (workBlockLive
         // under the running turn's own head, a second head would read as a second block
         ? <p className="chat-activity chat-activity-line" role="status"><CircleDot aria-hidden="true" />{t("Thinking…")}</p>
         // under a running turn's words: removing a line below them moves nothing when it ends
         : answerOnlyLive
-          ? <p className="chat-activity chat-activity-line" role="status"><CircleDot aria-hidden="true" />{activity === "thinking" ? t("Thinking…") : t("Working…")}</p>
+          ? <p className="chat-activity chat-activity-line" role="status"><CircleDot aria-hidden="true" />{activity === "thinking" ? t("Thinking…") : waitingOn !== null ? t("Waiting on {what}…", { what: waitingOn }) : t("Working…")}</p>
           // before the turn has a row at all, where its work block will be drawn
-          : <PendingWorkHead className="chat-activity" title={activity === "thinking" ? t("Thinking…") : t("Working…")} />)}
+          : <PendingWorkHead className="chat-activity" title={activity === "thinking" ? t("Thinking…") : waitingOn !== null ? t("Waiting on {what}…", { what: waitingOn }) : t("Working…")} />)}
       {loaded && empty && error === null && prompt === null && activity === "idle" && !(greeted && blank) && <div className="chat-empty"><AgentMark agent={agent ?? "agent"} size={32} /><p>{t("No conversation yet — say something below")}</p></div>}
       {ended && <p className="chat-endcap">{t("terminal ended")}</p>}
   </>;

@@ -20,7 +20,7 @@ import { pendingMessages } from "../lib/pendingMessages.ts";
 import { heldCountShown, heldOpenAtFold, heldOpenOnFocus, heldRefocusDue, heldRowError, heldRowsFold, heldRowsHidden, heldToggleShown, SHORT_PHONE_QUERY } from "../lib/heldRows.ts";
 import { arrangeNotices, dismissNotice, NO_DISMISSALS, settleDismissed, type DismissedNotices } from "../lib/composerNotices.ts";
 import { hermesCtrlCTooSoon, stopKey } from "../lib/hermesStop.ts";
-import { type DraftRefusal, MAX_COMPOSER_CHARS, QUEUE_READY_STATUS, agentDisplayLabel, composerDelivery, composerMessage, composerPayload, pendingActionUncertain, submitNote, submitNotTyped, submitRefusal } from "../lib/compose.ts";
+import { type DraftRefusal, MAX_COMPOSER_CHARS, QUEUE_READY_STATUS, agentDisplayLabel, composerDelivery, composerMessage, composerPayload, pendingActionUncertain, submitNote, submitNotTyped, submitRefusal, waitDrain } from "../lib/compose.ts";
 import { afterRead, afterSend, afterSettled, composerLift, greetingMemory, rememberGreeting, greetingFits, greetingFolder, roomOverComposer, showsGreeting, type ChatRead } from "../lib/greeting.ts";
 import { DETACHED, usePaneBranch } from "../lib/paneBranch.ts";
 import { answerFromText, answerHint, answerRefusal, needsConfirmation, type TypedAnswer } from "../lib/promptAnswer.ts";
@@ -112,6 +112,11 @@ export interface PaneTerminalProps {
   plan?: PlanSummary | null;
   /** the pane's turn ended on work still running in the background: the composer says BG */
   backgroundWait?: boolean;
+  /**
+   * what the working agent only waits on, the wait token's value (lib/waitToken.ts): a send goes
+   * at once, the queued rows go, the composer says BG and the chat says what it waits on. Null otherwise
+   */
+  waitingOn?: string | null;
   /** the pane's working directory and its PC's name: an empty chat's greeting names them */
   cwd?: string | null;
   /** the pane's workspace: its checkout's branch stands beside the folder under the composer */
@@ -165,6 +170,7 @@ export function PaneTerminal({
   backgroundTasks = 0,
   plan = null,
   backgroundWait = false,
+  waitingOn = null,
   cwd = null,
   workspaceId = null,
   worktreeRepo = null,
@@ -2620,14 +2626,14 @@ export function PaneTerminal({
       // an older bridge is told apart by the socket, once this connection's snapshot has said what it supports.
       // A draft is cleared only by a send at once: one that waits its turn is checked when it goes
       // with automatic sending off, a follow-up waits for Send now; the socket queues it on a PC too old to hold one
-      const queued = composerDelivery(agent, agentStatus);
+      const queued = composerDelivery(agent, agentStatus, waitingOn !== null);
       const delivery: SubmitDelivery = queued === "queue" && !settings.autoSendQueued ? "hold" : queued;
       // Send anyway answered a box seen at once: an agent that started working since would queue it unchecked
       if (sendAnyway && delivery !== "immediate") return t("Not sent: the agent started working since. Check the terminal, then send again.");
       const result = submitComposerMessage(text, delivery, delivery === "immediate" ? clearDraft : undefined, sendAnyway);
       return result === null ? false : result.then((answer) => answer.ok ? true : submitRefusal(answer.code, answer.message, answer.draft, answer.box, agent));
     },
-    [agent, agentStatus, answerPanePrompt, answering, heldByOpenQueue, submitComposerMessage, queueStore, machineId, settings.autoSendQueued],
+    [agent, agentStatus, waitingOn, answerPanePrompt, answering, heldByOpenQueue, submitComposerMessage, queueStore, machineId, settings.autoSendQueued],
   );
 
   const actOnPending = useCallback(async (id: string, action: "steer" | "discard"): Promise<void> => {
@@ -2688,6 +2694,19 @@ export function PaneTerminal({
     else await perform();
   }, [answering, ended, heldByOpenQueue, paneId, queueOwner, submitComposerMessage, submitRetention]);
 
+  // A working pane that comes to only wait ends its turn for the queue: this connection's own queued
+  // rows go now, in order, as Send now sends each (lib/compose.ts waitDrain). Each row once per wait,
+  // so one the pane refused is left with its note; the next wait, or the turn's end, sends it again.
+  const drainedRef = useRef<{ owner: string; ids: Set<string> } | null>(null);
+  useEffect(() => {
+    if (waitingOn === null || queueOwner === null) { drainedRef.current = null; return; }
+    if (drainedRef.current?.owner !== queueOwner) drainedRef.current = { owner: queueOwner, ids: new Set() };
+    const drained = drainedRef.current.ids;
+    const ids = waitDrain(pending, (id) => pendingMessages.isOwned(queueOwner, id, pendingScopeRef.current)).filter((id) => !drained.has(id));
+    if (ids.length === 0) return;
+    for (const id of ids) drained.add(id);
+    void (async () => { for (const id of ids) await actOnPending(id, "steer"); })();
+  }, [waitingOn, queueOwner, pending, actOnPending]);
 
   // Capture the owner's pane for the entire upload batch, even across a pane switch.
   const uploadImage = useCallback((file: File) => uploadPaneImage(paneId ?? "", file), [paneId]);
@@ -2924,6 +2943,7 @@ export function PaneTerminal({
             ended={ended}
             agent={agent}
             agentStatus={agentStatus}
+            waitingOn={waitingOn}
             onMetadata={onChatMetadata}
             onRead={onChatRead}
             greeted={greeted}
@@ -3043,6 +3063,7 @@ export function PaneTerminal({
           backgroundTasks={backgroundTasks}
           plan={plan}
           backgroundWait={backgroundWait}
+          waitingOn={waitingOn}
           metadata={chatMetadata?.pane === paneId ? chatMetadata.value : null}
           connected={connected && !held}
           connectedBefore={connectedBefore}

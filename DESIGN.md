@@ -847,7 +847,9 @@ Alert rows of the table above from the `--droplet-*` roles in `src/styles.css`.
 ### Badge (`.badge`)
 - Agent states read **READY**, **RUN**, **INPUT**, **DONE**; unknown reads **—**. **BG** is a pane
   whose turn ended while work it started still runs in the background (`background_wait`): it
-  stands in for DONE or READY until that work's turn ends.
+  stands in for DONE or READY until that work's turn ends. It also stands in for RUN on a working
+  pane whose agent only waits on background work, as the server's wait token says (`HERDR_WEB_WAIT_TOKEN`,
+  `src/lib/waitToken.ts`): a message reaches that pane at once, and the chat says what it waits on.
 - Idle is elevated/dim; working, blocked and done use their own tint and text. RUN carries a small
   breathing dot before the word; the word itself never fades. BG takes the working tint and text,
   holding still; a tab's dot for it is a working-coloured ring.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import { skillSyntax } from "../../shared/skill-syntax.ts";
-import { agentDisplayLabel, composerDelivery, composerMessage, terminalOnlyCommand, composerSendShown, composerPayload, composerModelDraw, composerStatusCompact, composerStatusHint, composerStatusWord, COMPOSER_STATUS_COMPACT_BELOW, contextLeftPercent, formatTokens, imageMention, insertLeadingMention, MAX_COMPOSER_CHARS, QUEUE_READY_STATUS, rankSlashCommands, submitNote, submitNotTyped, submitRefusal, sameMessage, pendingActionUncertain } from "./compose.ts";
+import { agentDisplayLabel, composerDelivery, composerMessage, terminalOnlyCommand, composerSendShown, composerPayload, composerModelDraw, composerStatusCompact, composerStatusHint, composerStatusWord, COMPOSER_STATUS_COMPACT_BELOW, contextLeftPercent, formatTokens, imageMention, insertLeadingMention, MAX_COMPOSER_CHARS, QUEUE_READY_STATUS, rankSlashCommands, submitNote, submitNotTyped, submitRefusal, sameMessage, pendingActionUncertain, waitDrain } from "./compose.ts";
 import { briefDescription, commandGroup, commandsForTrigger, slashCommandReplacement } from "./compose.ts";
 import { activeTrigger, applyCompletion, type ActiveTrigger } from "./mentions.ts";
 
@@ -295,6 +295,26 @@ describe("composer presentation helpers", () => {
       for (const state of ["idle", "blocked", "done", "unknown"] as const) expect(composerDelivery(agent, state)).toBe("immediate");
     }
     expect(composerDelivery(null, "working")).toBe("immediate");
+  });
+
+  it("sends at once to a working agent that only waits on background work", () => {
+    expect(composerDelivery("pi", "working", true)).toBe("immediate");
+    expect(composerDelivery("pi", "working", false)).toBe("queue");
+    expect(composerDelivery("pi", "blocked", true)).toBe("immediate");
+  });
+
+  it("drains a wait's queued rows this connection owns, in order, and leaves held and foreign ones", () => {
+    const rows = [
+      { id: "held", state: "held", serverOwned: true },
+      { id: "first", state: "queued", serverOwned: true },
+      { id: "sending", state: "sending", serverOwned: true },
+      { id: "theirs", state: "queued", serverOwned: true },
+      { id: "copy", state: "queued", serverOwned: false },
+      { id: "second", state: "queued", serverOwned: true },
+      { id: "lost", state: "uncertain", serverOwned: false },
+    ];
+    expect(waitDrain(rows, (id) => id !== "theirs")).toEqual(["first", "second"]);
+    expect(waitDrain([], () => true)).toEqual([]);
   });
 
   it("says the reconnecting sentence in the status content only once there is a draft", () => {

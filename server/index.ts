@@ -466,6 +466,13 @@ export function createServer(
   const hostname = options.hostname ?? process.env["HOST"] ?? "127.0.0.1";
   /** Empty token = gate disabled; every route then behaves exactly as it did before auth existed. */
   const token = options.token ?? process.env["HERDR_WEB_TOKEN"] ?? "";
+  /**
+   * The herdr pane token (`PaneInfo.tokens`, set through `pane.report_metadata`) whose value, on a
+   * working pane, says the agent only waits on background work and typed input ends the wait: the
+   * browser then sends to it as to a resting one, on every PC (src/lib/waitToken.ts). Unset, no
+   * token means that.
+   */
+  const waitToken = process.env["HERDR_WEB_WAIT_TOKEN"]?.trim() || null;
   /** paired devices (server/devices.ts) and the PC's Tailscale login: the two ways in besides the token and this PC itself */
   const devices = new DeviceStore(options.stateDir ?? defaultStateDir());
   const preferences = new PreferenceStore(options.stateDir ?? defaultStateDir());
@@ -1977,7 +1984,7 @@ export function createServer(
           // a forced answer (tests) and a runtime without the PTY sidecar are told the way a Windows herdr's own would be
           const herdr = attachableIdentity(info, sidecar);
           return jsonResponse({ ok: true, herdr, auth, ...(lan_exposure ? { lan_exposure } : {}),
-            web_ui: { boot_id: process.env["HERDR_WEB_BOOT_ID"] ?? null, revision: process.env["HERDR_WEB_REVISION"] ?? null } });
+            web_ui: { boot_id: process.env["HERDR_WEB_BOOT_ID"] ?? null, revision: process.env["HERDR_WEB_REVISION"] ?? null, ...(waitToken === null ? {} : { wait_token: waitToken }) } });
         } catch (error) {
           return errorResponse(error);
         }

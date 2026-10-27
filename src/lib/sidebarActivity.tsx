@@ -13,7 +13,7 @@ export interface SidebarActivity {
   /** herdr's state_change_seq per pane on a PC, a pushed status change dated at once */
   seqs(machineId: string): ReadonlyMap<string, number>;
   /** the status a row draws for a pane */
-  status(machineId: string, pane: Pick<HerdrPane, "pane_id" | "agent_status" | "background_wait">): AgentStatus | undefined;
+  status(machineId: string, pane: Pick<HerdrPane, "pane_id" | "agent_status" | "background_wait" | "tokens">): AgentStatus | undefined;
 }
 
 const NO_SEQS: ReadonlyMap<string, number> = new Map();
