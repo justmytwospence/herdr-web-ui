@@ -742,6 +742,7 @@ export const KO: Record<string, string> = {
   "Arguments omitted (too large)": "인자가 너무 커서 생략됨",
   "thinking": "생각",
   "Working…": "작업 중…",
+  "Waiting on {what}…": "{what} 대기 중…",
   "Worked for {duration}": "{duration} 작업",
   "Worked": "작업함",
   "Copy message": "메시지 복사",

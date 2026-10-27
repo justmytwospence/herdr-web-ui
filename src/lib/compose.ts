@@ -183,9 +183,22 @@ export function composerSendShown(state: { working: boolean; text: string }): bo
   return !state.working || state.text.trim().length > 0;
 }
 
-/** While an agent works, Send accepts a follow-up for its next turn. A shell sends immediately. */
-export function composerDelivery(agent: string | null, status?: AgentStatus): "queue" | "immediate" {
-  return agent !== null && status === "working" ? "queue" : "immediate";
+/**
+ * While an agent works, Send accepts a follow-up for its next turn. A shell sends immediately, and
+ * so does an agent that only waits on background work (`waiting`, lib/waitToken.ts): typed input
+ * ends its wait, as it does in the terminal.
+ */
+export function composerDelivery(agent: string | null, status?: AgentStatus, waiting = false): "queue" | "immediate" {
+  return agent !== null && status === "working" && !waiting ? "queue" : "immediate";
+}
+
+/**
+ * The rows a wait sends: once a working pane only waits (lib/waitToken.ts), its turn has ended for
+ * the queue, so this connection's own queued rows go now, in order, as Send now sends each. A held
+ * row waits for Send now as before; a row another connection owns, or one not confirmed, is left.
+ */
+export function waitDrain(messages: readonly { id: string; state: string; serverOwned: boolean }[], owned: (id: string) => boolean): string[] {
+  return messages.filter((message) => message.state === "queued" && message.serverOwned && owned(message.id)).map((message) => message.id);
 }
 
 /**

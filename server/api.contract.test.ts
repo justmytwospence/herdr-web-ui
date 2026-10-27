@@ -3383,6 +3383,22 @@ describe("bind address", () => {
     const res = await fetch(`http://127.0.0.1:${loopback.port}/api/health`);
     expect(res.status).toBe(200);
   });
+
+  it("names the wait token of HERDR_WEB_WAIT_TOKEN, and none when it is unset or blank", async () => {
+    const saved = process.env["HERDR_WEB_WAIT_TOKEN"];
+    const webUi = async (value: string | undefined) => {
+      if (value === undefined) delete process.env["HERDR_WEB_WAIT_TOKEN"]; else process.env["HERDR_WEB_WAIT_TOKEN"] = value;
+      const instance = createServer({ port: 0, hostname: "127.0.0.1", stateDir: mkdtempSync(join(tmpdir(), "herdr-wait-token-")) });
+      try { return ((await (await fetch(`http://127.0.0.1:${instance.port}/api/health`)).json()) as { web_ui: { wait_token?: string } }).web_ui; } finally { instance.stop(); }
+    };
+    try {
+      expect(await webUi(" bg_wait ")).toMatchObject({ wait_token: "bg_wait" });
+      expect(await webUi("  ")).not.toHaveProperty("wait_token");
+      expect(await webUi(undefined)).not.toHaveProperty("wait_token");
+    } finally {
+      if (saved === undefined) delete process.env["HERDR_WEB_WAIT_TOKEN"]; else process.env["HERDR_WEB_WAIT_TOKEN"] = saved;
+    }
+  });
 });
 
 describe("generated wire types", () => {

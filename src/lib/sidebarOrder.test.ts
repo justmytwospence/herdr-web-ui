@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import type { PaneInfo } from "../../shared/protocol.ts";
 import { activityOrder, liveSeqs, newSeqMemory, shownStatus, stateSeqs } from "./sidebarOrder.ts";
 import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings.ts";
+import { setWaitToken } from "./waitToken.ts";
 
 const pane = (id: string, agent_status: string, workspace_id = `w-${id}`) => ({ pane_id: id, workspace_id, agent_status }) as PaneInfo;
 const ids = (list: PaneInfo[]) => list.map((entry) => entry.pane_id);
@@ -60,6 +61,17 @@ describe("live counters", () => {
     liveSeqs(snap({ a: "idle", shell: "unknown" }, { a: 5 }), memory);
     const next = liveSeqs(snap({ a: "idle", shell: "working", c: "done" }, { a: 5, c: 7 }), memory);
     expect([...next]).toEqual([["a", 5], ["c", 7]]);
+  });
+
+});
+
+describe("shownStatus", () => {
+  it("draws a working pane that only waits, as the server's wait token says, as waiting", () => {
+    const waiting = { ...pane("a", "working"), tokens: { wait: "a job" } };
+    expect(shownStatus(waiting)).toBe("working");
+    setWaitToken("wait");
+    try { expect(shownStatus(waiting)).toBe("waiting"); } finally { setWaitToken(null); }
+    expect(shownStatus({ ...pane("b", "done"), background_wait: true })).toBe("waiting");
   });
 });
 
