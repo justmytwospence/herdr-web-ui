@@ -746,6 +746,7 @@ export const ZH: Record<string, string> = {
   "Arguments omitted (too large)": "参数过大，已省略",
   "thinking": "思考",
   "Working…": "正在工作…",
+  "Waiting on {what}…": "正在等待 {what}…",
   "Worked for {duration}": "工作了 {duration}",
   "Worked": "已工作",
   "Copy message": "复制消息",

@@ -744,6 +744,7 @@ export const JA: Record<string, string> = {
   "Arguments omitted (too large)": "引数が大きすぎるため省略しました",
   "thinking": "思考",
   "Working…": "作業中…",
+  "Waiting on {what}…": "{what} を待機中…",
   "Worked for {duration}": "{duration} 作業しました",
   "Worked": "作業完了",
   "Copy message": "メッセージをコピー",

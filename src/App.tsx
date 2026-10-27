@@ -10,6 +10,7 @@ import { MachineSessionsProvider } from "./lib/machineSessionContext.tsx";
 import { PaneTerminal } from "./components/PaneTerminal.tsx";
 import { PANE_TABPANEL_ID, paneTabPanelLabel } from "./lib/paneRegion.ts";
 import { worktreeRepoName } from "./lib/composerStrip.ts";
+import { setWaitToken, waitingOn } from "./lib/waitToken.ts";
 import { AccessGate } from "./components/AccessGate.tsx";
 import { AgentMark } from "./components/AgentMark.tsx";
 import { NewSessionDialog, type NewTabTarget } from "./components/NewSessionDialog.tsx";
@@ -551,7 +552,8 @@ export function App() {
   const loadHealth = useCallback(async () => {
     try { const next = await fetchBridgeHealth(); setLocked(next.auth.required && !next.auth.authenticated); setLockReason(next.auth.reason ?? null); setAuth(next.auth); }
     catch { /* retain the gate while the connection server restarts */ }
-    try { const next = await fetchHealth(); setHealth((previous) => sameData(previous, next) ? previous : next); } catch { setHealth(null); }
+    // the wait token the server names, for every pane's status (lib/waitToken.ts): before the state, so the render that follows reads it
+    try { const next = await fetchHealth(); setWaitToken(next.web_ui?.wait_token); setHealth((previous) => sameData(previous, next) ? previous : next); } catch { setHealth(null); }
   }, []);
   const snapshotRequests = useRef(new SnapshotRequests());
   const load = useCallback(async () => {
@@ -1750,6 +1752,7 @@ export function App() {
                         // an offline PC's cached plan cannot be read
                         plan={machine?.state === "connected" ? (item as HerdrPane | undefined)?.plan ?? null : null}
                         backgroundWait={item?.background_wait === true}
+                        waitingOn={item ? waitingOn(item) : null}
                         cwd={item?.cwd ?? null}
                         workspaceId={item?.workspace_id ?? null}
                         worktreeRepo={worktreeRepoName(item === null ? undefined : slotSnapshot?.workspaces.find((workspace) => workspace.workspace_id === item.workspace_id))}
