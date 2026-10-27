@@ -42,7 +42,7 @@ import type { PendingInputs } from "../pending-input.ts";
 import type { PreferenceStore } from "../preferences.ts";
 import { currentPrompt, type OmpLookups, onChatSubmitted, onPromptAnswering, promptWaitEnded, waitingCard } from "../prompt.ts";
 import { OpenCodePromptState } from "../opencode-prompt.ts";
-import { type AlertTiming, createPushService, defaultStateDir } from "../push.ts";
+import { type AlertTiming, createPushService, defaultStateDir, inputAlertTiming } from "../push.ts";
 import { SessionPlans } from "../session-plan.ts";
 import { readStatuslineContext } from "../statusline.ts";
 import { userHome } from "../user-home.ts";
@@ -114,7 +114,8 @@ export function createStatusHub<Owner, Lease>({ options, devices, preferences, c
     stateDir: options.stateDir ?? defaultStateDir(),
     webhook: alertWebhook,
     serverId: options.serverId,
-    timing: options.alertTiming,
+    // a timing given (tests) stands as it is; the server's own takes OVIS_INPUT_ALERT_DELAY
+    timing: options.alertTiming ?? inputAlertTiming(process.env["OVIS_INPUT_ALERT_DELAY"]),
     now: options.statusNow,
     loopbackHttp: options.pushLoopbackHttp === true,
     canDeliver,
