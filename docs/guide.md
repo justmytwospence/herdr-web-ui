@@ -962,6 +962,7 @@ Each `OVIS_*` variable was called `HERDR_WEB_*` before Ovis took its name (`OVIS
 | `OVIS_AUTO_UPDATE` | `0` | `1` installs new releases without asking |
 | `OVIS_UPDATE_CHANNEL` | unset (`stable`) | `beta` also offers the [beta builds](#beta-builds) made from main; `stable` turns them off whatever the state dir's `update-channel` file says |
 | `OVIS_TELEMETRY` | unset (on) | `0` sends no [anonymous usage counts](#anonymous-usage-counts), whatever the switch in Settings says. `DO_NOT_TRACK=1` does the same |
+| `OVIS_INPUT_ALERT_DELAY` | unset (10 seconds) | How many seconds an agent's question or permission request waits before its alert is pushed (also to the Also send to destination), so an answer given at the PC meanwhile calls it off; a finish keeps its own wait. Whole seconds, up to a day; anything else is ignored with a line in the server log |
 | `OVIS_PUSH_SUBJECT` | this repository's URL | VAPID contact URL or `mailto:` address |
 | `OVIS_BUNDLE_MANIFEST` | unset | Remote-PC bundle manifest (path or URL) that overrides local and published bundles |
 | `OVIS_HERDR_BIN` | `herdr` | herdr executable used for terminal attach |
