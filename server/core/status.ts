@@ -30,7 +30,7 @@ import type { OrderSequence } from "../order-sequence.ts";
 import type { PendingInputs } from "../pending-input.ts";
 import type { PreferenceStore } from "../preferences.ts";
 import { promptWaitEnded, type OpenCodePromptState } from "../prompt.ts";
-import { type AlertTiming, createPushService, defaultStateDir } from "../push.ts";
+import { type AlertTiming, createPushService, defaultStateDir, inputAlertTiming } from "../push.ts";
 import { SessionPlans } from "../session-plan.ts";
 import type { Telemetry } from "../telemetry.ts";
 import type { UsageLoginService } from "../usage-login.ts";
@@ -75,7 +75,8 @@ export function createStatusHub<Owner, Lease>({ options, devices, preferences, c
 }) {
   const push = createPushService({
     stateDir: options.stateDir ?? defaultStateDir(),
-    timing: options.alertTiming,
+    // a timing given (tests) stands as it is; the server's own takes OVIS_INPUT_ALERT_DELAY
+    timing: options.alertTiming ?? inputAlertTiming(process.env["OVIS_INPUT_ALERT_DELAY"]),
     now: options.statusNow,
     loopbackHttp: options.pushLoopbackHttp === true,
     canDeliver: (id) => id === null || (id === undefined ? !devices.gated : devices.has(id)),

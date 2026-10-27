@@ -10,7 +10,7 @@ import type { AgentStatus, HerdrPane, SessionSnapshot } from "../shared/protocol
 import { CompletionTracker } from "./completion.ts";
 import { handlePreferencesRequest, PreferenceStore } from "./preferences.ts";
 import { DeviceStore } from "./devices.ts";
-import { createPushService, handlePushRequest, parseSubscription, type PushService } from "./push.ts";
+import { createPushService, handlePushRequest, inputAlertTiming, parseSubscription, type PushService } from "./push.ts";
 import { startFakePushService, type FakePushService } from "./push.fake.ts";
 import { privateStateFs } from "./private-state.ts";
 
@@ -380,10 +380,12 @@ describe("push delivery", () => {
 describe("alert timing and each device's choice", () => {
   const SHORT = 40;
   const LONG = 80;
+  /** a question's own wait, where OVIS_INPUT_ALERT_DELAY sets one */
+  const INPUT = 120;
   /** real timers, short enough for a test; the clock that measures turns is ours to move */
-  function timed(alerts?: AlertPrefs) {
+  function timed(alerts?: AlertPrefs, input?: number) {
     let clock = 0;
-    const push = createPushService({ loopbackHttp: true, stateDir, timing: { short: SHORT, long: LONG, longTurn: 1_000 }, now: () => clock });
+    const push = createPushService({ loopbackHttp: true, stateDir, timing: { short: SHORT, long: LONG, longTurn: 1_000, input }, now: () => clock });
     push.subscribe(fake.subscription, alerts);
     push.seed([pane("w1:p1", "idle", "claude")]);
     return { push, advance: (ms: number) => { clock += ms; } };
@@ -419,11 +421,11 @@ describe("alert timing and each device's choice", () => {
   function holdAlertTimers() {
     const realSet = globalThis.setTimeout;
     const realClear = globalThis.clearTimeout;
-    const held = new Map<object, () => void>();
+    const held = new Map<object, { ms: number; run: () => void }>();
     const set = spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
-      if (ms !== SHORT && ms !== LONG) return realSet(callback, ms, ...args);
+      if (ms !== SHORT && ms !== LONG && ms !== INPUT) return realSet(callback, ms, ...args);
       const handle = {};
-      held.set(handle, () => callback(...args));
+      held.set(handle, { ms, run: () => callback(...args) });
       return handle;
     }) as never);
     const clear = spyOn(globalThis, "clearTimeout").mockImplementation(((handle: unknown) => {
@@ -431,10 +433,12 @@ describe("alert timing and each device's choice", () => {
     }) as never);
     return {
       pending: () => held.size,
+      /** the delays of the alerts held, in the order they were scheduled */
+      delays: () => [...held.values()].map((entry) => entry.ms),
       fire() {
         const due = [...held.values()];
         held.clear();
-        for (const run of due) run();
+        for (const { run } of due) run();
       },
       restore() { set.mockRestore(); clear.mockRestore(); },
     };
@@ -455,6 +459,28 @@ describe("alert timing and each device's choice", () => {
       timers.fire();
       await push.settled();
       expect(fake.received.map((r) => r.payload.body)).toEqual(["waiting for your input"]);
+    } finally { timers.restore(); }
+  });
+
+  it("gives a question its own wait when one is set, and a finish keeps `short`", async () => {
+    const timers = holdAlertTimers();
+    try {
+      const { push } = timed({ input: true, done: "always" }, INPUT);
+      await push.onStatus("w1:p1", "working");
+      await push.onStatus("w1:p1", "blocked");
+      expect(timers.delays()).toEqual([INPUT]);
+      // answered at the desk within the longer wait: no alert
+      await push.onStatus("w1:p1", "working");
+      expect(timers.pending()).toBe(0);
+      await push.onStatus("w1:p1", "done");
+      expect(timers.delays()).toEqual([SHORT]);
+      timers.fire();
+      await push.settled();
+      expect(fake.received.map((r) => r.payload.body)).toEqual(["work finished"]);
+      await push.onStatus("w1:p1", "blocked");
+      timers.fire();
+      await push.settled();
+      expect(fake.received.map((r) => r.payload.body)).toEqual(["work finished", "waiting for your input"]);
     } finally { timers.restore(); }
   });
 
@@ -499,6 +525,21 @@ describe("alert timing and each device's choice", () => {
     await none.push.onEnded("w1:p1");
     await none.push.settled();
     expect(fake.received).toHaveLength(0);
+  });
+
+  it("reads OVIS_INPUT_ALERT_DELAY as whole seconds, and ignores anything else with a word", () => {
+    const warnings: string[] = [];
+    const warn = (message: string) => { warnings.push(message); };
+    for (const value of [undefined, "", "  "]) expect(inputAlertTiming(value, warn)).toEqual({});
+    expect(inputAlertTiming("30", warn)).toEqual({ input: 30_000 });
+    expect(inputAlertTiming(" 0 ", warn)).toEqual({ input: 0 });
+    expect(inputAlertTiming("86400", warn)).toEqual({ input: 86_400_000 });
+    expect(warnings).toEqual([]);
+    for (const value of ["abc", "-1", "1.5", "30s", "1e3", "86401"]) {
+      expect(inputAlertTiming(value, warn)).toEqual({});
+      expect(warnings.at(-1)).toContain(`OVIS_INPUT_ALERT_DELAY=${JSON.stringify(value)}`);
+    }
+    expect(warnings).toHaveLength(6);
   });
 
   it("keeps a device's choice through a re-registration without one, and a restart", async () => {
