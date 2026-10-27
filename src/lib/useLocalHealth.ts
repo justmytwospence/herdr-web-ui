@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { fetchHealth, type HealthInfo } from "./api.ts";
 import { applyHealthRead, healthFreshness, machineHealth, type HealthBook } from "./healthPresentation.ts";
 import { sameData } from "./useMachineRoster.ts";
+import { setWaitToken } from "./waitToken.ts";
 
 export function useLocalHealth() {
   // this PC's health reads (lib/healthPresentation.ts): its newest answer is what its herdr can do,
@@ -21,6 +22,8 @@ export function useLocalHealth() {
     if (book === healthBook.current) return;
     healthBook.current = book;
     const { confirmed, failures } = machineHealth(book, "local");
+    // the wait token the server names, for every pane's status (lib/waitToken.ts): before the state, so the render that follows reads it
+    if (confirmed !== null) setWaitToken(confirmed.web_ui?.wait_token);
     setLocalHealth((previous) => sameData(previous, { confirmed, failures }) ? previous : { confirmed, failures });
   }, []);
 

@@ -5431,4 +5431,20 @@ describe("access facts on /api/health", () => {
       secured.stop();
     }
   });
+
+  it("names the wait token of OVIS_WAIT_TOKEN, and none when it is unset or blank", async () => {
+    const saved = process.env["OVIS_WAIT_TOKEN"];
+    const webUi = async (value: string | undefined) => {
+      if (value === undefined) delete process.env["OVIS_WAIT_TOKEN"]; else process.env["OVIS_WAIT_TOKEN"] = value;
+      const instance = serve();
+      try { return JSON.parse((await instance.read()).text).web_ui as { wait_token?: string }; } finally { instance.stop(); }
+    };
+    try {
+      expect(await webUi(" bg_wait ")).toMatchObject({ wait_token: "bg_wait" });
+      expect(await webUi("  ")).not.toHaveProperty("wait_token");
+      expect(await webUi(undefined)).not.toHaveProperty("wait_token");
+    } finally {
+      if (saved === undefined) delete process.env["OVIS_WAIT_TOKEN"]; else process.env["OVIS_WAIT_TOKEN"] = saved;
+    }
+  });
 });

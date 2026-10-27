@@ -3,6 +3,7 @@ import type { AgentStatus, HerdrPane, SessionSnapshot } from "../../shared/proto
 import machines from "../../site/demo/fixtures/machines.json";
 import { activityOrder, isSeenDone, liveSeqs, newSeqMemory, shownStatus, stateSeqs } from "./sidebarOrder.ts";
 import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings.ts";
+import { setWaitToken } from "./waitToken.ts";
 
 const template = machines.machines[0]!.snapshot!;
 const pane = (id: string, agent_status: AgentStatus, finish_id?: number): HerdrPane =>
@@ -106,6 +107,13 @@ describe("opened finish identity", () => {
     expect(shownStatus({ ...pane("a", "done", 2), background_wait: true }, { a: 2 })).toBe("waiting");
     expect(shownStatus({ ...pane("a", "blocked", 2), background_wait: true }, { a: 2 })).toBe("blocked");
     expect(shownStatus(pane("a", "done", 2), { a: 2 })).toBe("idle");
+  });
+
+  it("draws a working pane that only waits, as the server's wait token says, as waiting", () => {
+    const waiting = { ...pane("a", "working", 2), tokens: { wait: "a job" } };
+    expect(shownStatus(waiting, { a: 2 })).toBe("working");
+    setWaitToken("wait");
+    try { expect(shownStatus(waiting, { a: 2 })).toBe("waiting"); } finally { setWaitToken(null); }
   });
 });
 
