@@ -16,6 +16,8 @@ import type { MachineSession } from "./machineSession.ts";
 export interface ComposerSendsDeps {
   agent: string | null;
   agentStatus: AgentStatus | undefined;
+  /** A pane's `wait` token positively identifies a working agent waiting on background work. */
+  waitingOn?: string | null;
   answerPanePrompt: (answer: { pane_id: string; prompt_id: string }) => Promise<unknown>;
   answering: InteractivePrompt | null;
   /** the card's answer went out, but its next screen read has not answered yet */
@@ -57,7 +59,7 @@ export interface ComposerSendsDeps {
 }
 
 export function useComposerSends(deps: ComposerSendsDeps) {
-  const { agent, agentStatus, answerPanePrompt, answering, answerPending, chatNavigation, draftHeldForRef, ended, heldByOpenQueue, heldRef, inputAtRest, inputRowNow, knownOutcomes, observeRef, paneId, paneRef, pendingAnswer, pendingScopeRef, queueOwner, queueStore, machineId, secretRef, sessionRef, setChatLocalSend, setPendingAnswer, setPromptRefresh, settings, showSentCommand, socketRef, stillOpenNote, stillOpenNotedRef, stillOpenRef, submitComposerMessage, submitRetention, t } = deps;
+  const { agent, agentStatus, waitingOn = null, answerPanePrompt, answering, answerPending, chatNavigation, draftHeldForRef, ended, heldByOpenQueue, heldRef, inputAtRest, inputRowNow, knownOutcomes, observeRef, paneId, paneRef, pendingAnswer, pendingScopeRef, queueOwner, queueStore, machineId, secretRef, sessionRef, setChatLocalSend, setPendingAnswer, setPromptRefresh, settings, showSentCommand, socketRef, stillOpenNote, stillOpenNotedRef, stillOpenRef, submitComposerMessage, submitRetention, t } = deps;
 
   /** An answer from the message box, not the card: its failure is the box's note. */
   const sendAnswer = useCallback((pane: string, prompt: InteractivePrompt, choice: TypedAnswer): Promise<boolean | string> => {
@@ -128,7 +130,7 @@ export function useComposerSends(deps: ComposerSendsDeps) {
       // with automatic sending off, a follow-up waits for Send now; the socket queues it on a PC too old to hold one
       // herdr reads an idle Claude with a live subagent as working (a braille title spinner, and
       // "Waiting for N background agents to finish"); its own box at rest says it can take the message
-      const settled = composerDelivery(agent, agentStatus);
+      const settled = composerDelivery(agent, agentStatus, waitingOn !== null);
       const queued = settled === "queue" && inputAtRest?.() === true ? "immediate" : settled;
       const delivery: SubmitDelivery = queued === "queue" && !settings.autoSendQueued ? "hold" : queued;
       // Send anyway answered a box seen at once: an agent that started working since would queue it unchecked.
@@ -165,18 +167,21 @@ export function useComposerSends(deps: ComposerSendsDeps) {
         return true;
       });
     },
-    [agent, agentStatus, answering, answerPending, heldByOpenQueue, sendAnswer, submitComposerMessage, queueStore, machineId, settings.autoSendQueued, showSentCommand, inputAtRest, inputRowNow, stillOpenNote],
+    [agent, agentStatus, waitingOn, answering, answerPending, heldByOpenQueue, sendAnswer, submitComposerMessage, queueStore, machineId, settings.autoSendQueued, showSentCommand, inputAtRest, inputRowNow, stillOpenNote],
   );
 
-  const actOnPending = useCallback(async (id: string, action: "steer" | "discard" | "edit"): Promise<void> => {
+  const actOnPending = useCallback(async (id: string, action: "steer" | "discard" | "edit", autoEligibility?: () => boolean): Promise<boolean> => {
+    const owner = queueOwner, pane = paneId, originalScope = pendingScopeRef.current;
+    let attempted = false;
     const perform = async (): Promise<void> => {
-      const owner = queueOwner, pane = paneId;
-      const socket = socketRef.current, scope = pendingScopeRef.current;
+      const socket = socketRef.current, scope = autoEligibility ? originalScope : pendingScopeRef.current;
       if (owner === null || pane === null || paneRef.current !== pane) return;
       // what another tab saved since: a copy it is sending again is not confirmed here either
       pendingMessages.refresh(owner);
       const message = pendingMessages.read(owner).find((item) => item.id === id);
       if (!message || message.state === "sending") return;
+      if (autoEligibility && (action !== "steer" || pendingScopeRef.current !== scope || !message.serverOwned || message.state !== "queued"
+        || message.resendInFlight || !pendingMessages.isOwned(owner, id, scope) || !autoEligibility())) return;
       // Editing needs this connection's withdrawal authority, not just a saved held
       // copy. Uncertain Pi copies are receipts, not queued input.
       if (action === "edit" && (!message.serverOwned || message.state !== "queued" && message.state !== "held" || message.resendInFlight)) return;
@@ -186,16 +191,20 @@ export function useComposerSends(deps: ComposerSendsDeps) {
       // server-owned row's text and sends Enter without looking for a partial line (only Claude's box
       // is checked there). The row stays as it is, so Send now after the draft is settled, or Discard, still works.
       if (action === "steer" && draftHeldForRef.current === pane) {
+        if (autoEligibility) return;
         pendingMessages.fail(owner, id, { code: "held_input", message: "send or discard the held input first" }, false);
         return;
       }
       // a screen a peek left open would take it, as it would the composer's Send
       const open = stillOpenRef.current;
       if (action === "steer" && open !== null && open.pane === pane) {
+        if (autoEligibility) return;
         pendingMessages.fail(owner, id, { code: "still_open", message: stillOpenNote(open) }, false);
         return;
       }
+      if (autoEligibility && !autoEligibility()) return;
       if (!pendingMessages.begin(owner, id)) return;
+      attempted = true;
       try {
         if (message.serverOwned) {
           // A successful action can replay a prior discard. Only the matching sent removal,
@@ -269,9 +278,10 @@ export function useComposerSends(deps: ComposerSendsDeps) {
     // authority on LAN HTTP and when two tabs have already read the same held copy.
     if (navigator.locks) await navigator.locks.request(`pending:${queueOwner}:${id}`, perform);
     else await perform();
+    return attempted;
   }, [answering, ended, heldByOpenQueue, paneId, queueOwner, submitComposerMessage, submitRetention, showSentCommand, inputRowNow, stillOpenNote]);
 
-  sendNowRef.current = (id) => actOnPending(id, "steer");
+  sendNowRef.current = async (id) => { await actOnPending(id, "steer"); };
 
   return { composerSend, actOnPending, waitingAnswer };
 }

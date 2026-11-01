@@ -13,14 +13,15 @@ const tool = (command: string): ConversationPart => ({ kind: "tool", name: "Bash
 
 /** what Settings → Chat says about the chat's folds: off unless a test turns it on */
 type Folds = { showThinking?: boolean; expandThinking?: boolean; foldWork?: boolean };
+type TurnState = { live: boolean; waiting?: boolean; waitingOn?: string | null };
 
-const render = (parts: ConversationPart[], state: { live: boolean; waiting?: boolean }, role: ConversationTurn["role"] = "assistant", folds: Folds = {}): string => {
+const render = (parts: ConversationPart[], state: TurnState, role: ConversationTurn["role"] = "assistant", folds: Folds = {}): string => {
   const turn: ConversationTurn = { role, ts: "2026-01-01T12:00:00Z", end_ts: "2026-01-01T12:01:00Z", parts };
   const languages = Object.getOwnPropertyDescriptor(navigator, "languages");
   Object.defineProperty(navigator, "languages", { configurable: true, value: ["en"] });
   try {
     return renderToStaticMarkup(createElement(SettingsProvider, { children: createElement(Turn, {
-      paneId: "w1:p1", turn, rowKey: "turn:1", live: state.live, waiting: state.waiting ?? false, showThinking: false, ...folds,
+      paneId: "w1:p1", turn, rowKey: "turn:1", live: state.live, waiting: state.waiting ?? false, waitingOn: state.waitingOn ?? null, showThinking: false, ...folds,
     }) }));
   } finally {
     if (languages) Object.defineProperty(navigator, "languages", languages);
@@ -71,6 +72,74 @@ describe("an agent turn's work blocks", () => {
     const html = render([tool("ls"), tool("cat a"), text("Done.")], { live: false });
     expect(titles(html)).toEqual(["Worked for 1m"]);
     expect(html.indexOf("Worked for 1m")).toBeLessThan(html.indexOf("Done."));
+  });
+});
+
+describe("background-wait labels on the existing work head", () => {
+  const wait = { live: true, waitingOn: "indexing" };
+
+  it("changes only the selected live title in interleaved prose and tools, never their order or folds", () => {
+    const parts = [text("Checking first."), tool("ls"), text("Now the loans."), tool("cat loans"), text("No book is on loan.")];
+    const native = render(parts, { live: true });
+    const waiting = render(parts, wait);
+    expect(titles(waiting)).toEqual(["Worked", "Waiting on indexing…"]);
+    expect(expanded(waiting)).toEqual([false, true]);
+    expect(waiting.replace("Waiting on indexing…", "Working…")).toBe(native);
+    expect(titles(render(parts, { live: true, waitingOn: null }))).toEqual(["Worked", "Working…"]);
+    expect(titles(render(parts, { live: false, waitingOn: "indexing" }))).toEqual(["Worked", "Worked for 1m"]);
+    expect(titles(render(parts, { ...wait, waiting: true }))).toEqual(["Worked", "Needs you"]);
+  });
+
+  it("labels empty, whitespace and hidden-only pending heads without inventing settled or blocked heads", () => {
+    for (const parts of [[], [text("\n\n")], [reasoning]]) {
+      const html = render(parts, wait);
+      expect(titles(html)).toEqual(["Waiting on indexing…"]);
+      expect(html).toContain("work-block is-live is-pending");
+      expect(html.replace("Waiting on indexing…", "Working…")).toBe(render(parts, { live: true }));
+      expect(titles(render(parts, { live: false, waitingOn: "indexing" }))).toEqual([]);
+      expect(titles(render(parts, { ...wait, waiting: true }))).toEqual([]);
+    }
+    // When reasoning is shown it is the normal head, not the empty stand-in.
+    expect(titles(render([reasoning], wait, "assistant", { showThinking: true }))).toEqual(["Waiting on indexing…"]);
+    expect(titles(render([reasoning], { ...wait, waiting: true }, "assistant", { showThinking: true }))).toEqual(["Needs you"]);
+    expect(titles(render([reasoning], { live: false, waitingOn: "indexing" }, "assistant", { showThinking: true }))).toEqual(["Worked for 1m"]);
+  });
+
+  it("leaves answer-only turns without a work head, for the existing activity footer to label", () => {
+    for (const state of [wait, { ...wait, waiting: true }, { live: false, waitingOn: "indexing" }, { live: true }]) {
+      const html = render([text("An answer alone.")], state);
+      expect(titles(html)).toEqual([]);
+      expect(expanded(html)).toEqual([]);
+      expect(html).toContain("An answer alone.");
+      expect(html).not.toContain("Waiting on");
+    }
+  });
+
+  it("does not let hidden trailing reasoning steal the visible head", () => {
+    const parts = [tool("ls"), text("The shelf is full."), reasoning];
+    const hidden = render(parts, wait);
+    expect(titles(hidden)).toEqual(["Waiting on indexing…"]);
+    expect(expanded(hidden)).toEqual([true]);
+    expect(hidden.indexOf("Waiting on indexing…")).toBeLessThan(hidden.indexOf("The shelf is full."));
+    expect(titles(render(parts, { live: true }))).toEqual(["Working…"]);
+    expect(titles(render(parts, { live: false, waitingOn: "indexing" }))).toEqual(["Worked for 1m"]);
+    expect(titles(render(parts, { ...wait, waiting: true }))).toEqual(["Needs you"]);
+    const shown = render(parts, wait, "assistant", { showThinking: true });
+    expect(titles(shown)).toEqual(["Worked", "Waiting on indexing…"]);
+    expect(expanded(shown)).toEqual([false, true]);
+    expect(titles(render(parts, { live: true }, "assistant", { showThinking: true }))).toEqual(["Worked", "Working…"]);
+    expect(shown.indexOf("The shelf is full.")).toBeLessThan(shown.indexOf("Waiting on indexing…"));
+    expect(titles(render(parts, { live: false, waitingOn: "indexing" }, "assistant", { showThinking: true }))).toEqual(["Worked", "Worked for 1m"]);
+    expect(titles(render(parts, { ...wait, waiting: true }, "assistant", { showThinking: true }))).toEqual(["Worked", "Needs you"]);
+  });
+
+  it("keeps background work folded, unlike a head that needs you", () => {
+    const parts = [tool("ls"), text("Still looking."), tool("cat a")];
+    const html = render(parts, wait, "assistant", { foldWork: true });
+    expect(titles(html)).toEqual(["Worked", "Waiting on indexing…"]);
+    expect(expanded(html)).toEqual([false, false]);
+    expect(html.replace("Waiting on indexing…", "Working…")).toBe(render(parts, { live: true }, "assistant", { foldWork: true }));
+    expect(expanded(render(parts, { ...wait, waiting: true }, "assistant", { foldWork: true }))).toEqual([false, true]);
   });
 });
 
@@ -144,22 +213,23 @@ describe("an agent turn's folded work, drawn again", () => {
   let memory: ChatRowMemory;
   let renderer: ReactTestRenderer | undefined;
 
-  const view = (parts: ConversationPart[], folds: Folds = {}) => createElement(ChatRowMemoryContext.Provider, { value: memory, children: createElement(SettingsProvider, { children: createElement(Turn, {
-    paneId: "w1:p1", turn: { role: "assistant", ts: "2026-01-01T12:00:00Z", parts }, rowKey: "turn:1", live: true, waiting: false, showThinking: false, ...folds,
+  const view = (parts: ConversationPart[], folds: Folds = {}, state: TurnState = { live: true }) => createElement(ChatRowMemoryContext.Provider, { value: memory, children: createElement(SettingsProvider, { children: createElement(Turn, {
+    paneId: "w1:p1", turn: { role: "assistant", ts: "2026-01-01T12:00:00Z", parts }, rowKey: "turn:1", live: state.live, waiting: state.waiting ?? false, waitingOn: state.waitingOn ?? null, showThinking: false, ...folds,
   }) }) });
-  const draw = async (parts: ConversationPart[], folds: Folds = {}) => {
-    await act(async () => { if (renderer) renderer.update(view(parts, folds)); else renderer = create(view(parts, folds)); });
+  const draw = async (parts: ConversationPart[], folds: Folds = {}, state: TurnState = { live: true }) => {
+    await act(async () => { if (renderer) renderer.update(view(parts, folds, state)); else renderer = create(view(parts, folds, state)); });
   };
   const heads = () => renderer!.root.findAll((node) => node.props.className === "work-block-head");
   const opened = () => heads().map((node) => node.props["aria-expanded"] as boolean);
+  const headTitles = () => renderer!.root.findAll((node) => node.props.className === "work-block-title").map((node) => node.children.join(""));
   const toggle = async (index: number) => { await act(async () => { heads()[index]!.props.onClick(); }); };
   const thoughts = () => renderer!.root.findAll((node) => node.type === "div" && node.props.className === "work-row work-row-thinking").map((row) => row.findByType("button"));
   const thoughtOpened = () => thoughts().map((node) => node.props["aria-expanded"] as boolean);
   // the row scrolled out of the list and back: only its memory is left
-  const remount = async (parts: ConversationPart[], folds: Folds = {}) => {
+  const remount = async (parts: ConversationPart[], folds: Folds = {}, state: TurnState = { live: true }) => {
     await act(async () => { renderer!.unmount(); });
     renderer = undefined;
-    await draw(parts, folds);
+    await draw(parts, folds, state);
   };
   // the next message: a row of its own, with nothing chosen in it yet
   const nextMessage = async (parts: ConversationPart[], folds: Folds = {}) => {
@@ -188,6 +258,40 @@ describe("an agent turn's folded work, drawn again", () => {
     expect(opened()).toEqual([false]);
     await draw([tool("ls")]);
     expect(opened()).toEqual([true]);
+  });
+
+  it("keeps the chosen fold and run identity through label changes, clearing, hidden trailing runs and remounts", async () => {
+    const parts = [tool("ls"), text("The shelf is full."), reasoning];
+    const indexing = { live: true, waitingOn: "indexing" };
+    await draw(parts, {}, indexing);
+    expect(headTitles()).toEqual(["Waiting on indexing…"]);
+    await toggle(0);
+    expect(opened()).toEqual([false]);
+    const runMemory = [...memory.runs];
+    const dormantMemory = [...memory.dormant];
+    for (const state of [{ live: true, waitingOn: "tests" }, { live: true, waitingOn: null }, indexing]) {
+      await draw(parts, {}, state);
+      expect(headTitles()).toEqual([state.waitingOn === null ? "Working…" : `Waiting on ${state.waitingOn}…`]);
+      expect(opened()).toEqual([false]);
+      expect([...memory.runs]).toEqual(runMemory);
+      expect([...memory.dormant]).toEqual(dormantMemory);
+      await remount(parts, {}, state);
+      expect(headTitles()).toEqual([state.waitingOn === null ? "Working…" : `Waiting on ${state.waitingOn}…`]);
+      expect(opened()).toEqual([false]);
+      expect([...memory.runs]).toEqual(runMemory);
+      expect([...memory.dormant]).toEqual(dormantMemory);
+    }
+    // Showing the trailing reasoning chooses its existing head; hiding it restores the tools' fold.
+    await draw(parts, { showThinking: true }, indexing);
+    expect(headTitles()).toEqual(["Worked", "Waiting on indexing…"]);
+    expect(opened()).toEqual([false, true]);
+    await toggle(1);
+    await remount(parts, { showThinking: true }, { live: true, waitingOn: "tests" });
+    expect(headTitles()).toEqual(["Worked", "Waiting on tests…"]);
+    expect(opened()).toEqual([false, false]);
+    await remount(parts, {}, indexing);
+    expect(headTitles()).toEqual(["Waiting on indexing…"]);
+    expect(opened()).toEqual([false]);
   });
 
   it("keeps reasoning as the reader opened or closed it for its message, whatever Expand thinking says", async () => {

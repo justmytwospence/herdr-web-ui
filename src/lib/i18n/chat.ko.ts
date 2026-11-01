@@ -33,6 +33,7 @@ export const CHAT_KO: Record<string, string> = {
   "Arguments omitted (too large)": "인자가 너무 커서 생략됨",
   "thinking": "생각",
   "Working…": "작업 중…",
+  "Waiting on {what}…": "{what} 대기 중…",
   "Worked": "작업함",
   "Copy as markdown": "마크다운으로 복사",
   "Copy as plain text": "일반 텍스트로 복사",

@@ -33,6 +33,7 @@ export const CHAT_JA: Record<string, string> = {
   "Arguments omitted (too large)": "引数が大きすぎるため省略しました",
   "thinking": "思考",
   "Working…": "作業中…",
+  "Waiting on {what}…": "{what} を待機中…",
   "Worked": "作業完了",
   "Copy as markdown": "Markdown としてコピー",
   "Copy as plain text": "プレーンテキストとしてコピー",

@@ -89,6 +89,8 @@ export interface ComposerProps {
   plan?: PlanSummary | null;
   /** the pane's turn ended on work still running in the background: its word is BG, not DONE (lib/status.ts paneStatus) */
   backgroundWait?: boolean;
+  /** what the working agent only waits on (lib/waitToken.ts): its word is BG, not RUN; null otherwise */
+  waitingOn?: string | null;
   metadata?: ConversationMetadata | null;
   /** replaces the placeholder: how a message answers the agent's waiting prompt */
   answerHint?: string | null;
@@ -250,6 +252,7 @@ export function Composer({
   backgroundTasks = 0,
   plan = null,
   backgroundWait = false,
+  waitingOn = null,
   metadata,
   answerHint = null,
   waitingAnswer = null,
@@ -1173,7 +1176,7 @@ export function Composer({
   const compactText = compactCommandText(commands);
   const compactNow = compactText !== null && connected && !sending && !isWorking && agentStatus !== "blocked" ? () => sendQuick(compactText) : undefined;
   // what the status line says; what may be sent, queued or stopped goes by the agent's own status
-  const shownStatus = paneStatus({ agent_status: agentStatus, ...(backgroundWait ? { background_wait: true as const } : {}) });
+  const shownStatus = agentStatus === "working" && waitingOn !== null ? "waiting" : paneStatus({ agent_status: agentStatus, ...(backgroundWait ? { background_wait: true as const } : {}) });
   const statusCompact = composerStatusCompact(cardWidth);
   const sendShown = sending || carried.length > 0 || composerSendShown({ working: isWorking, text });
   const hint = composerStatusHint({ uploading, connected, text, noRoom: roomless !== undefined });

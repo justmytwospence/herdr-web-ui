@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import { skillSyntax } from "../../shared/skill-syntax.ts";
-import { agentDisplayLabel, claudeMainAtRest, composerDelivery, composerMessage, composerSendShown, composerPayload, composerModelDraw, composerStatusCompact, composerStatusHint, composerStatusWord, COMPOSER_STATUS_COMPACT_BELOW, contextLeftPercent, formatTokens, imageMention, insertLeadingMention, insertNote, MAX_COMPOSER_CHARS, QUEUE_READY_STATUS, rankSlashCommands, submitNote, submitNotTyped, submitRefusal, sameMessage, pendingActionUncertain, draftSendNote, endsWithTurn, stoppedTurn } from "./compose.ts";
+import { agentDisplayLabel, claudeMainAtRest, composerDelivery, waitDrain, composerMessage, composerSendShown, composerPayload, composerModelDraw, composerStatusCompact, composerStatusHint, composerStatusWord, COMPOSER_STATUS_COMPACT_BELOW, contextLeftPercent, formatTokens, imageMention, insertLeadingMention, insertNote, MAX_COMPOSER_CHARS, QUEUE_READY_STATUS, rankSlashCommands, submitNote, submitNotTyped, submitRefusal, sameMessage, pendingActionUncertain, draftSendNote, endsWithTurn, stoppedTurn } from "./compose.ts";
 import { briefDescription, COMMAND_GROUPS, commandGroup, commandsForTrigger, slashCommandReplacement, terminalCommand, typedTerminalCommand } from "./compose.ts";
 import type { ConversationTurn, SlashCommand } from "../../shared/protocol.ts";
 import { activeTrigger, applyCompletion, type ActiveTrigger } from "./mentions.ts";
@@ -403,9 +403,32 @@ describe("composer presentation helpers", () => {
     expect(composerSendShown({ working: false, text: "" })).toBe(true);
     for (const agent of ["codex", "claude", "pi", "omo"]) {
       expect(composerDelivery(agent, "working")).toBe("queue");
-      for (const state of ["idle", "blocked", "done", "unknown"] as const) expect(composerDelivery(agent, state)).toBe("immediate");
+      expect(composerDelivery(agent, "working", false)).toBe("queue");
+      expect(composerDelivery(agent, "working", true)).toBe("immediate");
+      for (const state of ["idle", "blocked", "done", "unknown", undefined] as const) {
+        expect(composerDelivery(agent, state)).toBe("immediate");
+        expect(composerDelivery(agent, state, true)).toBe("immediate");
+      }
     }
     expect(composerDelivery(null, "working")).toBe("immediate");
+    expect(composerDelivery(null, "working", true)).toBe("immediate");
+  });
+
+  it("drains only owned authoritative queued rows, in order and without mutation", () => {
+    const messages = Object.freeze([
+      { id: "second", state: "queued", serverOwned: true },
+      { id: "held", state: "held", serverOwned: true },
+      { id: "uncertain", state: "uncertain", serverOwned: true },
+      { id: "sending", state: "sending", serverOwned: true },
+      { id: "foreign", state: "queued", serverOwned: true },
+      { id: "copy", state: "queued", serverOwned: false },
+      { id: "busy", state: "queued", serverOwned: true, resendInFlight: true },
+      { id: "first", state: "queued", serverOwned: true },
+    ].map((message) => Object.freeze(message)));
+    expect(waitDrain(messages, (id) => id !== "foreign")).toEqual(["second", "first"]);
+    expect(waitDrain(messages, () => false)).toEqual([]);
+    expect(waitDrain([], () => true)).toEqual([]);
+    expect(messages.map((message) => message.id)).toEqual(["second", "held", "uncertain", "sending", "foreign", "copy", "busy", "first"]);
   });
 
   it("says the reconnecting sentence in the status content only once there is a draft", () => {
