@@ -64,6 +64,7 @@ export interface RequestServices {
   readonly token: string;
   readonly bridgeToken: string;
   readonly bootId: string;
+  readonly waitToken: string | null;
   readonly devices: DeviceStore;
   readonly preferences: PreferenceStore;
   readonly herdrSidebar: HerdrSidebarConfig;
@@ -101,7 +102,7 @@ export interface ServerContext {
 }
 
 export async function handleRequest(request: Request, ctx: ServerContext): Promise<Response | undefined> {
-  const { options, hostname, token, bridgeToken, bootId, devices, preferences, herdrSidebar, identityOf, serveOnly, portalGuards, shellAgents, agentDetector, agentOffered, agentInstaller, openCodeState, cliProxyRoutes, usageLogin, usage, voice, browserSnapshot, core, seen, piReader, orderSequence, clientConnectionLog, requestLog, portalStartupResult, portalStartup } = ctx.services;
+  const { options, hostname, token, bridgeToken, bootId, waitToken, devices, preferences, herdrSidebar, identityOf, serveOnly, portalGuards, shellAgents, agentDetector, agentOffered, agentInstaller, openCodeState, cliProxyRoutes, usageLogin, usage, voice, browserSnapshot, core, seen, piReader, orderSequence, clientConnectionLog, requestLog, portalStartupResult, portalStartup } = ctx.services;
   const { sidecar, serialize, push, logPushError, omo, claudeAgents, opencodeAgents, plans, clientSnapshot, machines, broadcastAll, collector, queueFirstMessage } = core;
   return requestLog.handle(request, async (headers) => {
   const startup = portalStartupResult ?? await portalStartup;
@@ -384,7 +385,7 @@ export async function handleRequest(request: Request, ctx: ServerContext): Promi
       // a forced answer (tests) and a runtime without the PTY sidecar are told the way a Windows herdr's own would be
       const herdr = attachableIdentity(info, sidecar);
       return jsonResponse({ ok: true, herdr, auth, ...(lan_exposure ? { lan_exposure } : {}), ...(security ? { security } : {}),
-        web_ui: { boot_id: bootId, revision: process.env["OVIS_REVISION"] ?? null } }, 200, securityHeaders);
+        web_ui: { boot_id: bootId, revision: process.env["OVIS_REVISION"] ?? null, ...(waitToken === null ? {} : { wait_token: waitToken }) } }, 200, securityHeaders);
     } catch (error) {
       return errorResponse(error);
     }

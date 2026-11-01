@@ -1031,7 +1031,10 @@ Alert rows of the table above from the `--droplet-*` roles in `src/styles.css`.
 ### Badge (`.badge`)
 - Agent states read **READY**, **RUN**, **INPUT**, **DONE**; unknown reads **—**. **BG** is a pane
   whose turn ended while work it started still runs in the background (`background_wait`): it
-  stands in for DONE or READY until that work's turn ends.
+  stands in for DONE or READY until that work's turn ends. With `OVIS_WAIT_TOKEN` configured, a raw
+  working pane whose named token holds a nonblank string also reads BG instead of RUN. This is a
+  display state, never a change to herdr's status, activity ordering, finish identity or alerts;
+  blocked still reads INPUT. The composer's Stop and Send controls still use the raw status.
 - Idle is elevated/dim; working, blocked and done use their own tint and text. RUN carries a small
   breathing dot before the word; the word itself never fades. BG takes the working tint and text,
   holding still; a tab's dot for it is a working-coloured ring.
@@ -2156,6 +2159,15 @@ Alert rows of the table above from the `--droplet-*` roles in `src/styles.css`.
   agent is blocked, by the pane's status and not by whether a prompt card was parsed) over
   one-line rows on the header's own left edge, which is the prose edge too (the hover plate
   overhangs it by `--space-1`).
+- An optional configured wait token substitutes `Waiting on {what}…` for Working on only that
+  existing live head, including its empty pending stand-in. `Needs you` wins over this label;
+  settled runs keep `Worked` and the head's duration. Hidden trailing reasoning never steals
+  the visible head, and neither the token nor a changed label changes segmentation, run keys,
+  fold memory or the reader's chosen expansion. Background waiting does not open a folded block
+  as a blocked question does. This follows the existing Claude-app prose/tool ordering and
+  Codex-app single working line, not a second activity component. The activity footer changes
+  words only: native `Thinking…` keeps priority, with the existing loading, connected, ended,
+  blocked and prompt guards, 800 ms reservation, placement, classes and accessibility unchanged.
 - A row is caret + verb + object: `▸ Read src/metrics.ts`, `▸ Edited src/pages/Reports.tsx`,
   `▸ Ran pnpm test`. The caret is always shown; there is no per-tool icon and no separator. The
   verb (Read, Edited, Wrote, Ran; `lib/toolVerbs.ts`, by exact tool id) is in the interface face,
@@ -2553,8 +2565,25 @@ Alert rows of the table above from the `--droplet-*` roles in `src/styles.css`.
   preferred, with weekly fallback; scoped, failed and unavailable limits do not substitute.
   The title names the account and reset times. This is not active-account detection. Mobile and
   remote panes omit it. The context ring is inert on mobile; details stay on desktop.
-- Working Send on a supporting bridge adds a pending message above the input card, before the
-  prompt dock. `PendingMessages` uses the chat's column and neutral user-bubble surface: plain
+- Readiness composes two positive signals: a configured wait token on a raw working pane permits
+  immediate delivery, and independently verified native idle input still permits it with no token.
+  Neither overrides prompt/answer, secret, held-draft, terminal-screen, ownership or connection
+  guards. `OVIS_WAIT_TOKEN` is captured once per primary server; only its optional name is exposed
+  in full health, not bridge-only health or remote bridge configuration. Unset keeps native
+  behavior unchanged, including its own verified readiness checks, rather than always queueing.
+  The token is an opt-in contract that typed input ends the agent's background wait, not proof
+  that a running job is finished or that the agent has consumed a delivered message.
+- During one continuous waiting episode, only this connection's own server-owned queued rows
+  drain, in input order, one receipt at a time through the existing Send now path. Eligibility,
+  current owner/scope and live send guards are rechecked at dispatch after any Web Lock. Held, uncertain,
+  foreign-scope, sending, busy and resend-in-flight rows never auto-send. A guard pauses without
+  consuming the next row; an attempt that began is not retried in the same episode, even if its
+  receipt later refuses or is uncertain. Beginning an attempt is not proof of delivery.
+  Changing only the label does not reset the attempted-ID ledger. Wait end, owner/scope change
+  or unmount stops future attempts; an already transmitted request keeps its normal receipt and
+  retention handling. This neither adds a queue nor changes Web Locks, stable IDs or receipts.
+- Working Send without a positive readiness signal on a supporting bridge adds a pending message
+  above the input card, before the prompt dock. `PendingMessages` uses the chat's column and neutral user-bubble surface: plain
   text aligned right, with no outer card. Its scrolling stack is capped by `--pending-max-h`
   (`min(20dvh, 12rem)`). The text stays selectable. Its separate ↑ Send now action sends it, and the small sibling X
   discards it. A sibling pencil **Edit queued message** withdraws only that exact unsent ID

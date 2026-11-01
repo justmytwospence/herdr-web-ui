@@ -52,6 +52,17 @@ const idleBox = ["─".repeat(40), "❯", "─".repeat(40)];
 const closedClaude = readFileSync(new URL("../../server/fixtures/claude-rewind-2.1.304-closed-40.txt", import.meta.url), "utf8");
 
 for (const autoSendQueued of [false, true]) {
+  for (const token of [null, "indexing"] as const) for (const native of [false, true]) {
+    it(`composes independent token=${token} and native=${native} readiness with autoSendQueued=${autoSendQueued}`, async () => {
+      const deliveries: SubmitDelivery[] = [];
+      const actions = sends("pi-waiting", { ok: true }, [], {
+        agent: "pi", agentStatus: "working", waitingOn: token, inputAtRest: () => native, settings: { autoSendQueued },
+        submitComposerMessage: (_text, delivery) => { deliveries.push(delivery); return Promise.resolve({ ok: true }); },
+      });
+      expect(await actions.composerSend("follow up")).toBe(true);
+      expect(deliveries).toEqual([token !== null || native ? "immediate" : autoSendQueued ? "queue" : "hold"]);
+    });
+  }
   it.each([
     ["wrapped running turn", [
       "✻ Investigating the authentication flow further… (3m 35s · ↓ 4.8k tokens) · esc to interrupt",
@@ -94,6 +105,22 @@ for (const autoSendQueued of [false, true]) {
     }
   });
 }
+
+it.each([
+  ["question", { answering: { id: "question", agent: "pi", kind: "question", title: "Choose", question: "Which?", body: null, options: [{ label: "One", description: null }], multi_select: false, custom_option_index: null } }],
+  ["held", { heldRef: { current: true } }],
+  ["secret", { secretRef: { current: "Password" } }],
+  ["disconnected", { socketRef: { current: { connected: false } as HerdrSocket } }],
+  ["open queue", { heldByOpenQueue: true }],
+] satisfies [string, Partial<ComposerSendsDeps>][])("a token cannot bypass %s when sending a message", async (_name, guard) => {
+  const deliveries: SubmitDelivery[] = [];
+  const actions = sends("guarded-token", { ok: true }, [], {
+    agent: "pi", agentStatus: "working", waitingOn: "indexing", inputAtRest: () => true, t: (key) => key,
+    submitComposerMessage: (_text, delivery) => { deliveries.push(delivery); return Promise.resolve({ ok: true }); }, ...guard,
+  });
+  expect(await actions.composerSend("not an option")).not.toBe(true);
+  expect(deliveries).toEqual([]);
+});
 
 it.each([
   ["unconfirmed", { ok: true, unconfirmed: true } as const],
@@ -232,6 +259,53 @@ it("sends a held copy of an agent-only message again as agent-only", async () =>
     expect(calls.map((call) => call[6])).toEqual([true]);
   } finally {
     pendingMessages.removeCopy(owner, message.id);
+    saved.restore();
+  }
+});
+
+it.each(["eligible", "episode ended", "held", "uncertain", "foreign", "removed", "resend", "dialog", "secret", "draft", "observe", "scope"] as const)("rechecks %s after a deferred Web Lock", async (change) => {
+  const saved = savedStorage(), descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const pane = `lock-${change}`, owner = paneStorageId("local", pane), id = `row-${change}`;
+  const message = { id, request_id: 1, text: "queued", state: "queued" as const, created_at: "2026-10-28T00:00:00Z" };
+  let release!: () => void, allowed = true, calls = 0;
+  const scope = { current: "scope" }, secret = { current: null as string | null }, draft = { current: null as string | null }, observe = { current: false };
+  const socket = { connected: true, on: () => () => {}, pendingAction: () => { calls++; return Promise.resolve({ ok: true }); } } as unknown as HerdrSocket;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { locks: { request: (_name: string, callback: () => Promise<void>) => new Promise<void>((resolve, reject) => { release = () => { callback().then(resolve, reject); }; }) } } });
+  try {
+    pendingMessages.accept(owner, message, "scope");
+    const actions = sends(pane, { ok: true }, [], { socketRef: { current: socket }, pendingScopeRef: scope, secretRef: secret, draftHeldForRef: draft, observeRef: observe });
+    const result = actions.actOnPending(id, "steer", () => allowed);
+    if (change === "episode ended" || change === "dialog") allowed = false;
+    if (change === "held" || change === "uncertain") pendingMessages.accept(owner, { ...message, state: change }, "scope");
+    if (change === "foreign") pendingMessages.accept(owner, message, "other");
+    if (change === "removed") pendingMessages.publish(owner, [], [{ id, outcome: "discarded" }], "scope");
+    if (change === "resend") pendingMessages.fail(owner, id, { code: "lost", message: "lost" }, true);
+    if (change === "secret") secret.current = "secret";
+    if (change === "draft") draft.current = pane;
+    if (change === "observe") observe.current = true;
+    if (change === "scope") scope.current = "other";
+    const before = structuredClone(pendingMessages.read(owner));
+    release();
+    expect(await result).toBe(change === "eligible");
+    expect(calls).toBe(change === "eligible" ? 1 : 0);
+    expect(pendingMessages.read(owner)).toEqual(before);
+  } finally {
+    pendingMessages.publish(owner, [], [{ id, outcome: "discarded" }], change === "foreign" ? "other" : "scope");
+    if (descriptor) Object.defineProperty(globalThis, "navigator", descriptor); else Reflect.deleteProperty(globalThis, "navigator");
+    saved.restore();
+  }
+});
+
+it("explicit Send now still steers a server-owned held row", async () => {
+  const saved = savedStorage(), pane = "explicit-held-server", owner = paneStorageId("local", pane), id = "explicit-held-server-row";
+  let calls = 0;
+  const socket = { connected: true, on: () => () => {}, pendingAction: () => { calls++; return Promise.resolve({ ok: true }); } } as unknown as HerdrSocket;
+  try {
+    pendingMessages.accept(owner, { id, request_id: 1, text: "held", state: "held", created_at: "2026-10-28T00:00:00Z" }, "scope");
+    expect(await sends(pane, { ok: true }, [], { socketRef: { current: socket } }).actOnPending(id, "steer")).toBe(true);
+    expect(calls).toBe(1);
+  } finally {
+    pendingMessages.publish(owner, [], [{ id, outcome: "discarded" }], "scope");
     saved.restore();
   }
 });

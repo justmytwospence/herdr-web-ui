@@ -1,8 +1,11 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import type { AgentStatus, HerdrPane, SessionSnapshot } from "../../shared/protocol.ts";
 import machines from "../../site/demo/fixtures/machines.json";
-import { activityOrder, isSeenDone, liveSeqs, newSeqMemory, shownStatus, stateSeqs } from "./sidebarOrder.ts";
+import { activityOrder, isSeenDone, liveSeqs, newSeqMemory, shownStatus, stateSeqs, type SeenRecord } from "./sidebarOrder.ts";
 import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings.ts";
+import { setWaitToken } from "./waitToken.ts";
+
+afterEach(() => { setWaitToken(null); });
 
 const template = machines.machines[0]!.snapshot!;
 const pane = (id: string, agent_status: AgentStatus, finish_id?: number): HerdrPane =>
@@ -88,6 +91,47 @@ describe("activity counters, independent of opened finishes", () => {
     const seqs = liveSeqs(latest, memory);
     expect(activityOrder(latest.panes, (pane) => pane, seqs).map((pane) => pane.pane_id)).toEqual(["c", "b", "a"]);
     expect(memory.bumped.size).toBe(0);
+  });
+});
+
+describe("wait-token presentation, independent of raw activity and finishes", () => {
+  it("draws only a working pane with the configured token as BG and clears it on absent health", () => {
+    const waiting = { ...pane("a", "working", 2), tokens: { wait: "a job" } };
+    expect(shownStatus(waiting, { a: 2 })).toBe("working");
+    setWaitToken("wait");
+    const seenRecords: (SeenRecord | null)[] = [null, {}, { a: 2 }];
+    for (const seen of seenRecords) {
+      expect(shownStatus(waiting, seen)).toBe("waiting");
+      expect(shownStatus({ ...waiting, background_wait: true }, seen)).toBe("waiting");
+      for (const tokens of [{}, { wait: " " }, { wait: 3 }]) {
+        expect(shownStatus({ ...waiting, tokens }, seen)).toBe("working");
+      }
+      expect(shownStatus({ ...waiting, agent_status: "blocked", background_wait: true }, seen)).toBe("blocked");
+      expect(shownStatus({ ...waiting, agent_status: "question" }, seen)).toBe("question");
+      expect(shownStatus({ ...waiting, agent_status: "idle" }, seen)).toBe("idle");
+    }
+    // The token does not invent a finish, nor does it hide an acknowledged one.
+    expect(isSeenDone(waiting, { a: 2 })).toBe(false);
+    expect(shownStatus({ ...waiting, agent_status: "done" }, null)).toBe("done");
+    expect(shownStatus({ ...waiting, agent_status: "done" }, { a: 2 })).toBe("idle");
+    expect(shownStatus({ ...waiting, agent_status: "done", background_wait: true }, { a: 2 })).toBe("waiting");
+    setWaitToken(undefined);
+    expect(shownStatus(waiting, { a: 2 })).toBe("working");
+    expect(waiting.agent_status).toBe("working");
+  });
+
+  it("does not create recency edges or change ordering when only a wait label changes", () => {
+    setWaitToken("wait");
+    const snapshot = snap({ a: "working", b: "done", c: "blocked" }, { a: 5, b: 9, c: 1 });
+    const memory = newSeqMemory();
+    expect([...liveSeqs(snapshot, memory)]).toEqual([["a", 5], ["b", 9], ["c", 1]]);
+    for (const tokens of [{ wait: "a job" }, { wait: "indexing" }, {}]) {
+      snapshot.panes[0] = { ...snapshot.panes[0]!, tokens };
+      const seqs = liveSeqs(snapshot, memory);
+      expect([...seqs]).toEqual([["a", 5], ["b", 9], ["c", 1]]);
+      expect(memory.bumped.size).toBe(0);
+      expect(activityOrder(snapshot.panes, (p) => p, seqs).map((p) => p.pane_id)).toEqual(["c", "b", "a"]);
+    }
   });
 });
 

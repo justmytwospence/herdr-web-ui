@@ -203,6 +203,7 @@ export function createServer(
    * /api/health's `web_ui.boot_id` and the epoch of the workspace order's counter (server/order-sequence.ts).
    */
   const bootId = process.env["OVIS_BOOT_ID"] || randomUUID();
+  const waitToken = process.env["OVIS_WAIT_TOKEN"]?.trim() || null;
   const orderSequence = new OrderSequence(bootId);
   const hostname = options.hostname ?? process.env["HOST"] ?? "127.0.0.1";
   /** Empty token = gate disabled; every route then behaves exactly as it did before auth existed. */
@@ -310,7 +311,7 @@ export function createServer(
 
   const requestLog = new RequestLog(stateDir);
   const services: RequestServices = {
-    options, hostname, token, bridgeToken, bootId, devices, preferences, herdrSidebar, identityOf, serveOnly, portalGuards, shellAgents, agentDetector, agentOffered, agentInstaller, openCodeState, cliProxyRoutes, usageLogin, usage, voice, browserSnapshot, core, seen, piReader, orderSequence, clientConnectionLog, requestLog, portalStartup,
+    options, hostname, token, bridgeToken, bootId, waitToken, devices, preferences, herdrSidebar, identityOf, serveOnly, portalGuards, shellAgents, agentDetector, agentOffered, agentInstaller, openCodeState, cliProxyRoutes, usageLogin, usage, voice, browserSnapshot, core, seen, piReader, orderSequence, clientConnectionLog, requestLog, portalStartup,
     get portalStartupResult() { return portalStartupResult; },
   };
 

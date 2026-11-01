@@ -104,7 +104,9 @@ export type { DevicePairedEvent, Machine, MachineEvent, MachineRoster, PaneTarge
  *  GET    /api/health                    -> { ok: true, herdr: HerdrIdentity (shared/machines.ts; terminal_attach false on a
  *                                          Windows herdr and on a bridge that cannot run the PTY sidecar; terminal_mirror: its
  *                                          terminal lens is the pane's screen, repainted; /api/bridge tells the same herdr), auth: HealthAuth,
- *                                          web_ui: { boot_id: string, revision: string | null },
+ *                                          web_ui: { boot_id: string, revision: string | null, wait_token?: string },
+ *                                          (wait_token: the optional OVIS_WAIT_TOKEN pane-token name, full health only;
+ *                                          configured once on the PC serving the page, not on remote bridges)
  *                                          security?: SecuritySummary (authenticated only, no-store) } (boot_id: this server
  *                                          lifetime's id, the supervisor's when managed; older servers sent null unmanaged)
  *  GET    /api/session                   -> { snapshot: SessionSnapshot }

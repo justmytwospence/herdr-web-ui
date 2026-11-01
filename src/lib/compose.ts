@@ -286,8 +286,13 @@ export function composerSendShown(state: { working: boolean; text: string }): bo
 }
 
 /** While an agent works, Send accepts a follow-up for its next turn. A shell sends immediately. */
-export function composerDelivery(agent: string | null, status?: AgentStatus): "queue" | "immediate" {
-  return agent !== null && status === "working" ? "queue" : "immediate";
+export function composerDelivery(agent: string | null, status?: AgentStatus, waiting = false): "queue" | "immediate" {
+  return agent !== null && status === "working" && !waiting ? "queue" : "immediate";
+}
+
+/** Only this connection's authoritative queued rows may drain during a waiting episode. */
+export function waitDrain(messages: readonly { id: string; state: string; serverOwned: boolean; resendInFlight?: boolean }[], owned: (id: string) => boolean): string[] {
+  return messages.filter((message) => message.state === "queued" && message.serverOwned && !message.resendInFlight && owned(message.id)).map((message) => message.id);
 }
 
 /**

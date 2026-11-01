@@ -326,9 +326,11 @@ has not been written after 5 seconds (the agent may well be working on it alread
 command (`/cost`, `! ls`) gets no bubble, since it never comes back as that message.
 
 Every agent has the same chat controls on desktop and phones: Stop while it works with an empty
-draft, Send when you type, and Send at rest. With a draft in the box, Escape stops the agent. Sending during work adds a message bubble above the
-input card. It waits for the current response, then goes to the agent's next turn. Use a pending message's
-**↑ Send now** action to send it now. The bridge immediately delivers it; when the agent reads
+draft, Send when you type, and Send at rest. With a draft in the box, Escape stops the agent.
+Sending during work normally adds a message bubble above the input card. It waits for the current
+response, then goes to the agent's next turn. Independently verified native idle input can still
+permit an immediate send while status catches up. Use a pending message's **↑ Send now** action
+to send it now. The bridge immediately delivers it; when the agent reads
 it is controlled by that agent, so this does not promise instant interruption. The small X discards it.
 The bridge claims the same message ID for Send now and an automatic send, so they cannot both
 deliver it. Older bridges keep the draft and ask for an update instead of changing queueing into
@@ -337,6 +339,27 @@ discarded after checking the terminal. Previously held browser messages still ne
 or **Discard**. A message is never pasted over text typed in Claude Code's own input box: while
 that box holds a draft the message stays in the list with the reason, and **Send now** delivers it
 once the draft is sent or cleared in the terminal.
+
+If your agent reports that it is only waiting on background work, `OVIS_WAIT_TOKEN` can name that
+herdr pane token. A nonblank string on a working pane permits immediate chat delivery alongside,
+not instead of, native input-readiness checks. Neither signal bypasses a prompt, secret input,
+held draft, open terminal screen, connection or ownership guard. Only configure this for an agent
+whose wait ends when you type in its terminal. Unset preserves the default native behavior.
+
+While that token is present, this connection's own queued messages drain serially through the
+existing **Send now** path, waiting for each receipt and rechecking the current pane, ownership,
+scope and send guards at dispatch after any Web Lock. Held, uncertain, foreign or in-flight rows never drain.
+A guard pauses the drain; an attempt that began is not retried in that waiting episode, even if its
+receipt refuses or is uncertain. Beginning an attempt does not prove delivery. Changing the
+label alone does not start a new episode. Ending the wait, changing pane owner/scope or leaving
+the attachment stops future sends, without cancelling a request already transmitted or replaying
+it after reconnect.
+
+The pane and composer read **BG**, but the agent's actual status, completion alerts and Stop/Send
+controls do not change. Only the existing selected live work head says **Waiting on indexing…**
+(for example); settled work keeps its duration, **Needs you** wins for a blocked agent, and native
+**Thinking…** keeps priority in the activity line. Answer-only turns use their existing footer.
+Labels do not change prose/tool order, folds or activity placement, visibility and loading guards.
 
 ## Subscription usage
 
@@ -682,6 +705,7 @@ Each `OVIS_*` variable was called `HERDR_WEB_*` before Ovis took its name (`OVIS
 | `OVIS_SSH` | `ssh` (Git for Windows' on Windows) | OpenSSH client for [remote PCs](#remote-pcs-over-ssh); the `sftp` and `ssh-keygen` beside it are used too |
 | `OVIS_APP_NAME` | unset (`Ovis`) | The name the installed app has on a phone or computer, for example the PC's name. Each PC installs as an app of its own, and without it they are all called `Ovis`. An app already installed takes the new name when the browser next updates it, usually within a day or two, without a reinstall. Keep it short: a home screen cuts a long label |
 | `OVIS_PASTE_DIR` | `<pane cwd>/.ovis` | Where pasted and attached files are saved: an absolute path or `~/…`. Set it to keep them out of your projects; an agent may then ask before reading one. It covers the panes of this server's PC; a remote PC keeps the default |
+| `OVIS_WAIT_TOKEN` | unset | The name of a herdr pane token (`pane.report_metadata`) whose nonblank string value says a working agent only waits on background work and typed input ends the wait. Captured once on the PC serving the app, the name applies to panes of every PC; it is not propagated as remote bridge configuration. It permits guarded immediate delivery and a serial drain of this connection's own queued rows, with BG and `Waiting on {what}…` labels. Unset keeps native readiness behavior unchanged. See [chat controls](#features) above. |
 | `OVIS_MEDIA_ROOTS` | unset | Folders besides its own that a rendered HTML page may play a video or sound from, through a symlink beside it or a `../` link: absolute paths separated by `:` (`;` on Windows), for example a network share where recordings are kept. Any page can then find out which files exist there. Unset, a page plays its large videos only from its own folder, so a page that came with its own symlinks cannot find out which of this PC's files exist. A large video plays from an address made for that render: it works only from the device's network address that opened the page, for 30 minutes (reload the page after that), and stops when that device is revoked or signs out. The page's own script can read that address and share it, so for those 30 minutes anyone behind the same network address can play that file too. On a Mac, every folder from the one named here down to the file must belong to the user Ovis runs as and be writable by no group or other user, or nothing in it plays |
 | `CODEX_HOME` | `~/.codex` | Where Codex sessions are read |
 

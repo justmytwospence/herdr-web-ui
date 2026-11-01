@@ -5521,7 +5521,7 @@ describe("shared preferences API", () => {
 });
 
 describe("access facts on /api/health", () => {
-  type Body = { auth: HealthAuth; lan_exposure?: LanExposure; security?: SecuritySummary };
+  type Body = { auth: HealthAuth; lan_exposure?: LanExposure; security?: SecuritySummary; web_ui?: { boot_id: string | null; revision: string | null; wait_token?: string } };
   const SECRET = "fictional-t0k3n-value";
   const guard = { "content-type": "application/json", "x-herdr-machine": "1" };
   /** a server of its own: a temp state dir, an empty token unless one is given, nothing from the runner's environment */
@@ -5536,6 +5536,32 @@ describe("access facts on /api/health", () => {
     };
     return { port: instance.port, stateDir, read, stop: () => { instance.stop(); rmSync(stateDir, { recursive: true, force: true }); } };
   };
+
+  for (const [configured, expected] of [["  wait \n", "wait"], [" \t\n ", undefined], [undefined, undefined]] as const) {
+    it(`full health names only a configured wait token (${JSON.stringify(configured)}), including for anonymous callers`, async () => {
+      const saved = process.env["OVIS_WAIT_TOKEN"];
+      let secured: ReturnType<typeof serve> | undefined;
+      try {
+        if (configured === undefined) delete process.env["OVIS_WAIT_TOKEN"]; else process.env["OVIS_WAIT_TOKEN"] = configured;
+        secured = serve({ token: SECRET });
+        const callers: Record<string, string>[] = [{}, { authorization: `Bearer ${SECRET}` }];
+        for (const headers of callers) {
+          const full = await secured.read(headers);
+          expect(full.status).toBe(200);
+          expect(full.body.web_ui).toBeDefined();
+          if (expected === undefined) expect(full.body.web_ui).not.toHaveProperty("wait_token");
+          else expect(full.body.web_ui?.wait_token).toBe(expected);
+          expect(full.body.auth.authenticated).toBe("authorization" in headers);
+          const bridge = await secured.read(headers, "?scope=bridge");
+          expect(bridge.status).toBe(200);
+          expect(bridge.body).not.toHaveProperty("web_ui");
+        }
+      } finally {
+        secured?.stop();
+        if (saved === undefined) delete process.env["OVIS_WAIT_TOKEN"]; else process.env["OVIS_WAIT_TOKEN"] = saved;
+      }
+    });
+  }
 
   it("authenticated summary contains only safe facts", async () => {
     const secured = serve({ token: SECRET });

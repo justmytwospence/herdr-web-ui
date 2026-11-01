@@ -65,6 +65,7 @@ import { useTerminalRefits } from "../lib/useTerminalRefits.ts";
 import { usePaneAttach } from "../lib/usePaneAttach.ts";
 import { useTerminalSends } from "../lib/useTerminalSends.ts";
 import { useComposerSends } from "../lib/useComposerSends.ts";
+import { useWaitDrain } from "../lib/useWaitDrain.ts";
 import { usePeekReturn } from "../lib/usePeekReturn.ts";
 import { useChatCallbacks } from "../lib/useChatCallbacks.ts";
 import { useTypedKeys } from "../lib/useTypedKeys.ts";
@@ -100,6 +101,8 @@ export interface PaneTerminalProps {
   plan?: PlanSummary | null;
   /** the pane's turn ended on work still running in the background: the composer says BG */
   backgroundWait?: boolean;
+  /** The raw working pane's configured background-wait label; never a prompt override. */
+  waitingOn?: string | null;
   /** the pane's working directory and its PC's name: an empty chat's greeting names them */
   cwd?: string | null;
   /** the pane's workspace: its checkout's branch stands beside the folder under the composer */
@@ -168,6 +171,7 @@ export function PaneTerminal({
   backgroundTasks = 0,
   plan = null,
   backgroundWait = false,
+  waitingOn = null,
   cwd = null,
   workspaceId = null,
   worktreeRepo = null,
@@ -894,8 +898,22 @@ export function PaneTerminal({
     }} />
     : null;
 
-  const { composerSend, actOnPending, waitingAnswer } = useComposerSends({ agent, agentStatus, answerPanePrompt, answering, draftHeldForRef, ended, heldByOpenQueue, heldRef, inputAtRest, inputRowNow, knownOutcomes, observeRef, paneId, paneRef, pendingAnswer, pendingScopeRef, queueOwner, queueStore, machineId, secretRef, setPendingAnswer, setPromptRefresh, settings, showSentCommand, socketRef, stillOpenNote, stillOpenNotedRef, stillOpenRef, submitComposerMessage, submitRetention, t, chatNavigation, setChatLocalSend, sessionRef });
+  const { composerSend, actOnPending, waitingAnswer } = useComposerSends({ agent, agentStatus, waitingOn, answerPanePrompt, answering, draftHeldForRef, ended, heldByOpenQueue, heldRef, inputAtRest, inputRowNow, knownOutcomes, observeRef, paneId, paneRef, pendingAnswer, pendingScopeRef, queueOwner, queueStore, machineId, secretRef, setPendingAnswer, setPromptRefresh, settings, showSentCommand, socketRef, stillOpenNote, stillOpenNotedRef, stillOpenRef, submitComposerMessage, submitRetention, t, chatNavigation, setChatLocalSend, sessionRef });
 
+  const waitScope = pendingScopeRef.current;
+  useWaitDrain({
+    waiting: agent !== null && agentStatus === "working" && waitingOn !== null,
+    owner: queueOwner,
+    scope: waitScope,
+    pending,
+    owned: (id) => queueOwner !== null && pendingMessages.isOwned(queueOwner, id, pendingScopeRef.current) && !pendingMessages.isBusy(queueOwner, id),
+    canSend: () => paneId !== null && paneRef.current === paneId && machineIdRef.current === machineId
+      && waitScope !== null && pendingScopeRef.current === waitScope && sessionRef.current?.scope === waitScope
+      && socketRef.current?.connected === true && !observeRef.current && !endedRef.current && !releasedRef.current
+      && !heldRef.current && secretRef.current === null && answering === null && !heldByOpenQueue
+      && draftHeldForRef.current !== paneId && stillOpenRef.current?.pane !== paneId,
+    send: (id, eligibility) => actOnPending(id, "steer", eligibility),
+  });
 
   // Capture the owner's pane for the entire upload batch, even across a pane switch.
   const uploadImage = useCallback((file: Blob) => uploadPaneImage(paneId ?? "", file), [paneId]);
@@ -1172,6 +1190,7 @@ export function PaneTerminal({
             ended={ended}
             agent={agent}
             agentStatus={agentStatus}
+            waitingOn={waitingOn}
             onMetadata={onChatMetadata}
             onRead={onChatRead}
             greeted={greeted}
@@ -1277,9 +1296,9 @@ export function PaneTerminal({
         blocked={held || secretActive || ended || heldByOpenQueue || answering !== null}
         unsaved={pendingMessages.isUnsaved(queueOwner)}
         isBusy={(id) => pendingMessages.isBusy(queueOwner, id)}
-        onSendNow={(id) => actOnPending(id, "steer")}
-        onEdit={(id) => actOnPending(id, "edit")}
-        onDiscard={(id) => actOnPending(id, "discard")}
+        onSendNow={async (id) => { await actOnPending(id, "steer"); }}
+        onEdit={async (id) => { await actOnPending(id, "edit"); }}
+        onDiscard={async (id) => { await actOnPending(id, "discard"); }}
       />}
       {/* The prompt card's place: under the held messages (which fold to their caption while it is
           open), directly over the input card, on the same column. ChatView renders the card into
@@ -1303,6 +1322,7 @@ export function PaneTerminal({
           backgroundTasks={backgroundTasks}
           plan={plan}
           backgroundWait={backgroundWait}
+          waitingOn={waitingOn}
           metadata={chatMetadata?.pane === paneId ? chatMetadata.value : null}
           connected={connected && !held}
           connectedBefore={connectedBefore}

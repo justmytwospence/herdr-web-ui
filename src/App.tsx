@@ -10,6 +10,7 @@ import { PaneTerminal } from "./components/PaneTerminal.tsx";
 import { paneCovered, paneContentKey, paneContentPresented } from "./lib/panePresentation.ts";
 import { PANE_TABPANEL_ID, paneTabPanelLabel } from "./lib/paneRegion.ts";
 import { worktreeRepoName } from "./lib/composerStrip.ts";
+import { waitingOn } from "./lib/waitToken.ts";
 import { AccessGate } from "./components/AccessGate.tsx";
 import { AgentMark } from "./components/AgentMark.tsx";
 import { NewSessionDialog } from "./components/NewSessionDialog.tsx";
@@ -899,6 +900,7 @@ export function App() {
                         // an offline PC's cached plan cannot be read
                         plan={machine?.state === "connected" ? (item as HerdrPane | undefined)?.plan ?? null : null}
                         backgroundWait={item?.background_wait === true}
+                        waitingOn={item ? waitingOn(item) : null}
                         cwd={item?.cwd ?? null}
                         workspaceId={item?.workspace_id ?? null}
                         worktreeRepo={worktreeRepoName(item === null ? undefined : slotSnapshot?.workspaces.find((workspace) => workspace.workspace_id === item.workspace_id))}

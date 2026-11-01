@@ -1,6 +1,9 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 
 import { paneStatus, rollupStatus, statusEdgeRead } from "./status.ts";
+import { setWaitToken } from "./waitToken.ts";
+
+afterEach(() => { setWaitToken(null); });
 
 describe("rollupStatus", () => {
   it("rolls a workspace's panes up as herdr does: blocked, then done, then working, then ready", () => {
@@ -26,6 +29,32 @@ describe("paneStatus", () => {
     expect(paneStatus({ agent_status: "working", background_wait: true })).toBe("working");
     expect(paneStatus({ agent_status: "blocked", background_wait: true })).toBe("blocked");
     expect(paneStatus({ agent_status: "done" })).toBe("done");
+  });
+
+  it("only presents raw working panes with a configured nonblank string token as BG", () => {
+    const pane = { agent_status: "working" as const, tokens: { wait: "the test suite" } };
+    expect(paneStatus(pane)).toBe("working");
+    setWaitToken("wait");
+    expect(paneStatus(pane)).toBe("waiting");
+    expect(paneStatus({ ...pane, background_wait: true })).toBe("waiting");
+    for (const tokens of [{}, { wait: "" }, { wait: " \n " }, { wait: 3 }, { other: "job" }]) {
+      expect(paneStatus({ ...pane, tokens })).toBe("working");
+    }
+    expect(paneStatus({ agent_status: "working" })).toBe("working");
+    for (const agent_status of ["idle", "done", "blocked", "question", "something-new", undefined]) {
+      expect(paneStatus({ ...pane, agent_status })).toBe(agent_status === "idle" || agent_status === "done" || agent_status === "blocked" ? agent_status : "unknown");
+    }
+    // A stale token never wins over a blocked prompt, with or without background_wait.
+    expect(paneStatus({ ...pane, agent_status: "blocked", background_wait: true })).toBe("blocked");
+    // Existing background work at rest still has its own presentation, independent of the token.
+    for (const agent_status of ["idle", "done"] as const) {
+      expect(paneStatus({ ...pane, agent_status, background_wait: true })).toBe("waiting");
+    }
+    setWaitToken(null);
+    expect(paneStatus(pane)).toBe("working");
+    setWaitToken(" ");
+    expect(paneStatus(pane)).toBe("working");
+    expect(pane.agent_status).toBe("working");
   });
 
   it("is unknown only when no pane says more", () => {

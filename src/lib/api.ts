@@ -502,7 +502,7 @@ export async function fetchPaneConversation(paneId: string, machineId = "local",
 export interface HealthInfo {
   ok: boolean;
   herdr: HerdrIdentity;
-  web_ui?: { boot_id: string | null; revision: string | null };
+  web_ui?: { boot_id: string | null; revision: string | null; wait_token?: string };
   /** Absent only on a server that predates the token gate. */
   auth?: HealthAuth;
   /** present only while this server is reachable beyond this PC with no token and nothing paired */
