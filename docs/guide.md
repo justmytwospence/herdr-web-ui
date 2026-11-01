@@ -332,9 +332,11 @@ has not been written after 5 seconds (the agent may well be working on it alread
 command (`/cost`, `! ls`) gets no bubble, since it never comes back as that message.
 
 Every agent has the same chat controls on desktop and phones: Stop while it works with an empty
-draft, Send when you type, and Send at rest. With a draft in the box, Escape stops the agent. Sending during work adds a message bubble above the
-input card. It waits for the current response, then goes to the agent's next turn. Use a pending message's
-**↑ Send now** action to send it now. The bridge immediately delivers it; when the agent reads
+draft, Send when you type, and Send at rest. With a draft in the box, Escape stops the agent.
+Sending during work normally adds a message bubble above the input card. It waits for the current
+response, then goes to the agent's next turn. Independently verified native idle input can still
+permit an immediate send while status catches up. Use a pending message's **↑ Send now** action
+to send it now. The bridge immediately delivers it; when the agent reads
 it is controlled by that agent, so this does not promise instant interruption. The small X discards it.
 The bridge claims the same message ID for Send now and an automatic send, so they cannot both
 deliver it. Older bridges keep the draft and ask for an update instead of changing queueing into
@@ -343,6 +345,29 @@ discarded after checking the terminal. Previously held browser messages still ne
 or **Discard**. A message is never pasted over text typed in Claude Code's own input box: while
 that box holds a draft the message stays in the list with the reason, and **Send now** delivers it
 once the draft is sent or cleared in the terminal.
+
+A tool that keeps an agent's turn open only to wait on background work can say so: set the pane
+token `wait` to what it waits on (`herdr pane report-metadata <pane_id> --source <id> --token
+wait=<what>`) and clear it when the wait ends. A nonblank `wait` on a working pane permits immediate
+chat delivery alongside, not instead of, native input-readiness checks. Neither signal bypasses a
+prompt, secret input, held draft, open terminal screen, connection or ownership guard. Only set it
+for an agent whose wait ends when you type in its terminal. Panes without it keep the default
+behaviour.
+
+While that token is present, this connection's own queued messages drain serially through the
+existing **Send now** path, waiting for each receipt and rechecking the current pane, ownership,
+scope and send guards at dispatch after any Web Lock. Held, uncertain, foreign or in-flight rows never drain.
+A guard pauses the drain; an attempt that began is not retried in that waiting episode, even if its
+receipt refuses or is uncertain. Beginning an attempt does not prove delivery. Changing the
+label alone does not start a new episode. Ending the wait, changing pane owner/scope or leaving
+the attachment stops future sends, without cancelling a request already transmitted or replaying
+it after reconnect.
+
+The pane and composer read **BG**, but the agent's actual status, completion alerts and Stop/Send
+controls do not change. Only the existing selected live work head says **Waiting on indexing…**
+(for example); settled work keeps its duration, **Needs you** wins for a blocked agent, and native
+**Thinking…** keeps priority in the activity line. Answer-only turns use their existing footer.
+Labels do not change prose/tool order, folds or activity placement, visibility and loading guards.
 
 ## Subscription usage
 
