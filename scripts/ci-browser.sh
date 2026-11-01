@@ -220,6 +220,7 @@ run_script scripts/agent-helpers-fold-demo-regression.ts
 run_script scripts/sidebar-agent-tree-demo-regression.ts
 run_script scripts/agent-lock-demo-regression.ts
 run_script scripts/agent-groups-demo-regression.ts
+run_script scripts/wait-token-demo-regression.ts
 run_script scripts/pane-mute-demo-regression.ts
 run_script scripts/workspace-touch-reorder-demo-regression.ts
 run_script scripts/prompt-dock-demo-regression.ts

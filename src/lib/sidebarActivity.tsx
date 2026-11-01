@@ -10,7 +10,7 @@ import { fetchBridgeHealth } from "./api.ts";
 
 export interface SidebarActivity {
   seqs(machineId: string): ReadonlyMap<string, number>;
-  status(machineId: string, pane: Pick<HerdrPane, "pane_id" | "agent_status" | "background_wait" | "finish_id">): AgentStatus | undefined;
+  status(machineId: string, pane: Pick<HerdrPane, "pane_id" | "agent_status" | "background_wait" | "finish_id" | "tokens">): AgentStatus | undefined;
 }
 const NO_SEQS: ReadonlyMap<string, number> = new Map();
 const SidebarActivityContext = createContext<SidebarActivity>({ seqs: () => NO_SEQS, status: (_machineId, pane) => shownStatus(pane, null) });

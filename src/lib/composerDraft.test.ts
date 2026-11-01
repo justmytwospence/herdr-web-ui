@@ -132,7 +132,7 @@ it("drops a busy saved copy when its delayed resend learns that another tab with
       return null;
     }
     renderToStaticMarkup(createElement(Composer));
-    sending = actions.actOnPending(message.id, "steer");
+    sending = actions.actOnPending(message.id, "steer").then(() => {});
     await started.promise;
     original.publish(owner, [], [{ id: message.id, outcome: "discarded" }], "original");
     pendingMessages.refresh(owner);

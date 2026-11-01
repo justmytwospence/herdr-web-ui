@@ -28,6 +28,27 @@ describe("paneStatus", () => {
     expect(paneStatus({ agent_status: "done" })).toBe("done");
   });
 
+  it("only presents raw working panes with a nonblank string `wait` token as BG", () => {
+    const pane = { agent_status: "working" as const, tokens: { wait: "the test suite" } };
+    expect(paneStatus(pane)).toBe("waiting");
+    expect(paneStatus({ ...pane, background_wait: true })).toBe("waiting");
+    for (const tokens of [{}, { wait: "" }, { wait: " \n " }, { wait: 3 }, { other: "job" }]) {
+      expect(paneStatus({ ...pane, tokens })).toBe("working");
+    }
+    expect(paneStatus({ agent_status: "working" })).toBe("working");
+    for (const agent_status of ["idle", "done", "blocked", "question", "something-new", undefined]) {
+      expect(paneStatus({ ...pane, agent_status })).toBe(agent_status === "idle" || agent_status === "done" || agent_status === "blocked" ? agent_status : "unknown");
+    }
+    // A stale token never wins over a blocked prompt, with or without background_wait.
+    expect(paneStatus({ ...pane, agent_status: "blocked", background_wait: true })).toBe("blocked");
+    // Existing background work at rest still has its own presentation, independent of the token.
+    for (const agent_status of ["idle", "done"] as const) {
+      expect(paneStatus({ ...pane, agent_status, background_wait: true })).toBe("waiting");
+    }
+    expect(paneStatus({ agent_status: "working", tokens: { other: "the test suite" } })).toBe("working");
+    expect(pane.agent_status).toBe("working");
+  });
+
   it("is unknown only when no pane says more", () => {
     expect(rollupStatus([undefined, "unknown", "something-new"])).toBe("unknown");
     expect(rollupStatus([])).toBe("unknown");
