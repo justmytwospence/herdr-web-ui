@@ -1,14 +1,24 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import * as herdr from "./herdr/client.ts";
 import { UsageLoginService } from "./usage-login.ts";
+import * as usage from "./usage.ts";
+import type { UsageContext } from "./usage.ts";
 
 const root = mkdtempSync(join(tmpdir(), "usage-login-prompt-"));
 const bin = join(root, "bin");
+const ctx: UsageContext & { has(command: string): boolean } = {
+  home: root, env: {}, platform: process.platform, now: Date.now,
+  fetch: async () => { throw new Error("unexpected network request"); },
+  run: async () => null, has: () => true, keychain: async () => ({ status: "missing" }),
+};
 const spies: { mockRestore(): void }[] = [];
+beforeEach(() => {
+  spies.push(spyOn(usage, "systemUsageContext").mockImplementation(() => { throw new Error("host usage context requested"); }));
+});
 const typed: { pane: string; text: string }[] = [];
 const keys: { pane: string; keys: string[] }[] = [];
 
@@ -32,7 +42,7 @@ function stubHerdr(): void {
 describe("a first sign-in, in the agent's own home", () => {
   it("runs the CLI with its home variable removed, so the plain command finds the sign-in", async () => {
     stubHerdr();
-    const service = new UsageLoginService(root, { PATH: bin });
+    const service = new UsageLoginService(root, { PATH: bin }, ctx);
     const started = await service.handle(new Request("http://x/api/usage/login", { method: "POST", body: JSON.stringify({ provider: "codex", default: true }) }));
     expect(started.status).toBe(200);
     expect(typed.map((entry) => entry.text).join("")).toBe(`exec 'env' '-u' 'CODEX_HOME' '${join(bin, "codex")}' 'login' '--device-auth'\n`);
@@ -44,7 +54,7 @@ describe("a first sign-in, in the agent's own home", () => {
     mkdirSync(join(root, ".codex-other"), { recursive: true });
     writeFileSync(join(root, ".codex-other", "auth.json"), JSON.stringify({ tokens: { access_token: `header.${claims}.signature` } }));
     try {
-      const service = new UsageLoginService(root, { PATH: bin });
+      const service = new UsageLoginService(root, { PATH: bin }, ctx);
       const asked = await service.handle(new Request("http://x/api/usage/login", { method: "POST", body: JSON.stringify({ provider: "codex", default: true }) }));
       expect(((await asked.json()) as { error: { code: string } }).error.code).toBe("account_confirmation_required");
       expect(typed).toEqual([]);
@@ -59,7 +69,7 @@ describe("a first sign-in, in the agent's own home", () => {
     mkdirSync(join(root, ".codex"), { recursive: true });
     writeFileSync(join(root, ".codex", "auth.json"), JSON.stringify({ tokens: { access_token: `header.${claims}.signature` } }));
     try {
-      const service = new UsageLoginService(root, { PATH: bin });
+      const service = new UsageLoginService(root, { PATH: bin }, ctx);
       const ask = (body: unknown) => service.handle(new Request("http://x/api/usage/login", { method: "POST", body: JSON.stringify(body) }));
       const refused = await ask({ provider: "codex", default: true });
       expect(refused.status).toBe(409);

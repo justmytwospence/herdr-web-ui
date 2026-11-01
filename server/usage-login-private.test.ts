@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,8 @@ import * as ptyHost from "./pty/host.ts";
 import * as ptySidecar from "./pty/sidecar.ts";
 import { readProcessBirth } from "./process-owner.ts";
 import { UsageLoginService } from "./usage-login.ts";
+import * as usage from "./usage.ts";
+import type { UsageContext } from "./usage.ts";
 
 /**
  * A sign-in the browser follows runs through the server's private PTY host, never in a
@@ -18,7 +20,15 @@ const root = mkdtempSync(join(tmpdir(), "usage-login-private-"));
 const bin = join(root, "bin");
 const fixtures = join(import.meta.dir, "fixtures/usage-login");
 const receipt = (name: string) => join(root, `${name}.receipt`);
+const ctx: UsageContext & { has(command: string): boolean } = {
+  home: root, env: {}, platform: process.platform, now: Date.now,
+  fetch: async () => { throw new Error("unexpected network request"); },
+  run: async () => null, has: () => true, keychain: async () => ({ status: "missing" }),
+};
 const spies: { mockRestore(): void }[] = [];
+beforeEach(() => {
+  spies.push(spyOn(usage, "systemUsageContext").mockImplementation(() => { throw new Error("host usage context requested"); }));
+});
 const services = new Set<UsageLoginService>();
 let names = 0;
 
@@ -89,9 +99,12 @@ async function within<T>(promise: Promise<T>): Promise<T> {
 
 /** Subscribe before reading so output between the read and the wait cannot be lost. */
 async function promptWhen(service: UsageLoginService, login: string, until: (prompt: Record<string, unknown>) => boolean): Promise<Record<string, unknown>> {
+  if (typeof login !== "string" || !/^[0-9a-f-]{36}$/.test(login)) throw new Error("invalid login id");
   for (;;) {
     const changed = service.changed(login);
-    const prompt = (await (await read(service, login)).json()) as Record<string, unknown>;
+    const response = await read(service, login);
+    if (!response.ok) throw new Error(`login prompt read failed: ${response.status}`);
+    const prompt = (await response.json()) as Record<string, unknown>;
     if (until(prompt)) return prompt;
     if (prompt["ended"]) throw new Error("login ended before the expected prompt");
     await within(changed);
@@ -99,10 +112,31 @@ async function promptWhen(service: UsageLoginService, login: string, until: (pro
 }
 
 describe("a sign-in the browser follows", () => {
+  it("discovers a default Claude sign-in through only the fake macOS keychain", async () => {
+    const asked: string[] = [];
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, {
+      ...ctx, platform: "darwin",
+      keychain: async (name) => { asked.push(name); return { status: "missing" }; },
+    });
+    const started = await start(service, { provider: "claude", default: true });
+    expect(started.status).toBe(200);
+    expect(asked).toContain("Claude Code-credentials");
+    expect(usage.systemUsageContext).not.toHaveBeenCalled();
+    const { login_id: login } = await started.json() as { login_id: string };
+    await promptWhen(service, login, (shown) => shown["wants_code"] === true);
+    await post(service, "cancel", { login });
+  });
+
+  it("rejects a missing login id or refused prompt before waiting for changes", async () => {
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
+    await expect(promptWhen(service, undefined as unknown as string, () => false)).rejects.toThrow("invalid login id");
+    await expect(promptWhen(service, "00000000-0000-4000-8000-000000000000", () => false)).rejects.toThrow("login prompt read failed: 404");
+  });
+
   for (const endpoint of ["prompt", "code", "cancel"]) {
     it(`refuses another owner holding the real id at ${endpoint}`, async () => {
       noHerdr();
-      const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+      const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
       const { login_id: login } = await (await start(service, { provider: "codex", name: `owner-${++names}` })).json() as { login_id: string };
       const response = endpoint === "prompt" ? await read(service, login, false, "device:b")
         : await post(service, endpoint, { login, code: "fixture-code" }, "device:b");
@@ -113,15 +147,9 @@ describe("a sign-in the browser follows", () => {
 
   it("signals the next output and the end without timed polling", async () => {
     noHerdr();
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     const { login_id: login } = await (await start(service, { provider: "claude", name: `signal-${++names}` })).json() as { login_id: string };
-    for (;;) {
-      const changed = service.changed(login);
-      const prompt = await (await read(service, login)).json() as { wants_code: boolean; ended: boolean };
-      if (prompt.wants_code) break;
-      if (prompt.ended) throw new Error("login ended before its prompt");
-      await within(changed);
-    }
+    await promptWhen(service, login, (shown) => shown["wants_code"] === true);
     const ended = service.changed(login);
     expect((await post(service, "code", { login, code: "signal#state" })).status).toBe(204);
     await within(ended);
@@ -132,7 +160,7 @@ describe("a sign-in the browser follows", () => {
   it("offers terminal fallback when neither out of process PTY host exists", async () => {
     noHerdr();
     spies.push(spyOn(ptyHost, "rustSidecar").mockReturnValue(null), spyOn(ptySidecar, "nodeSidecarAvailable").mockReturnValue(false));
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     const response = await start(service, { provider: "codex", name: `no-host-${++names}` });
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: { code: "follow_unsupported" } });
@@ -144,7 +172,7 @@ describe("a sign-in the browser follows", () => {
       spyOn(herdr, "tabCreate").mockResolvedValue({ root_pane: { pane_id: "w1:p9", terminal_id: "t9" }, tab: { workspace_id: "w1" } } as never),
       spyOn(herdr, "paneSendText").mockResolvedValue(undefined as never),
     );
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     const name = `handoff-${++names}`;
     const { login_id: login } = await (await start(service, { provider: "codex", name })).json() as { login_id: string };
     expect((await post(service, "cancel", { login })).status).toBe(204);
@@ -155,7 +183,7 @@ describe("a sign-in the browser follows", () => {
 
   it("runs in a private terminal: herdr opens no tab and no pane holds its address", async () => {
     const asked = noHerdr();
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     const started = await start(service, { provider: "codex", name: `work-${++names}` });
     expect(started.status).toBe(200);
     const body = (await started.json()) as Record<string, unknown>;
@@ -169,7 +197,7 @@ describe("a sign-in the browser follows", () => {
 
   it("answers only the browser that holds its id, and never a device that only watches", async () => {
     noHerdr();
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     const { login_id: login } = (await (await start(service, { provider: "codex", name: `work-${++names}` })).json()) as { login_id: string };
     expect((await read(service, "00000000-0000-4000-8000-000000000000")).status).toBe(404);
     expect((await read(service, login, true)).status).toBe(403);
@@ -180,7 +208,7 @@ describe("a sign-in the browser follows", () => {
   it("types a pasted code into the CLI's own terminal, ends with it, and has the usage read again", async () => {
     noHerdr();
     let ended = 0;
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     service.onLoginEnded(() => { ended += 1; });
     const { login_id: login } = (await (await start(service, { provider: "claude", name: `work-${++names}` })).json()) as { login_id: string };
     const prompt = await promptWhen(service, login, (shown) => shown["wants_code"] === true);
@@ -194,7 +222,7 @@ describe("a sign-in the browser follows", () => {
 
   it("stops the CLI when the browser cancels, and frees its home for the next sign-in", async () => {
     noHerdr();
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     const first = (await (await start(service, { provider: "codex", default: true })).json()) as { login_id: string };
     expect((await start(service, { provider: "codex", default: true })).status).toBe(409);
     expect((await post(service, "cancel", { login: first.login_id })).status).toBe(204);
@@ -206,7 +234,9 @@ describe("a sign-in the browser follows", () => {
 
   it("signs in to the CLI's own home with its home variable removed", async () => {
     noHerdr();
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CONFIG_DIR: "/elsewhere" });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CONFIG_DIR: join(root, "elsewhere") }, {
+      ...ctx, env: { CLAUDE_CONFIG_DIR: join(root, "elsewhere") },
+    });
     const { login_id: login } = (await (await start(service, { provider: "claude", default: true })).json()) as { login_id: string };
     await promptWhen(service, login, (shown) => shown["wants_code"] === true);
     expect(readFileSync(receipt("claude-home"), "utf8").trim()).toBe("default");
@@ -216,7 +246,7 @@ describe("a sign-in the browser follows", () => {
   it("keeps its id out of the shared lock file, which another device can read, in a shape older servers read", async () => {
     noHerdr();
     const state = mkdtempSync(join(root, "state-"));
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     service.persistTo(state);
     const { login_id: login } = (await (await start(service, { provider: "codex", name: `work-${++names}` })).json()) as { login_id: string };
     const saved = readFileSync(join(state, "usage-logins.json"), "utf8");
@@ -229,8 +259,8 @@ describe("a sign-in the browser follows", () => {
   it("lets no second server in this process take a home a followed sign-in holds", async () => {
     noHerdr();
     const state = mkdtempSync(join(root, "state-"));
-    const first = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
-    const second = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const first = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
+    const second = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     first.persistTo(state); second.persistTo(state);
     const { login_id: login } = (await (await start(first, { provider: "codex", default: true })).json()) as { login_id: string };
     expect((await start(second, { provider: "codex", default: true })).status).toBe(409);
@@ -239,11 +269,11 @@ describe("a sign-in the browser follows", () => {
 
   it("stops a sign-in no browser came back to read, and every one when the server stops", async () => {
     noHerdr();
-    const unread = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, undefined, { leaseMs: 150, maxMs: 60_000 });
+    const unread = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx, { leaseMs: 150, maxMs: 60_000 });
     const { login_id: lost } = (await (await start(unread, { provider: "codex", name: `work-${++names}` })).json()) as { login_id: string };
     await unread.settled(lost);
     expect(((await (await read(unread, lost)).json()) as { ended: boolean }).ended).toBe(true);
-    const stopping = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const stopping = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     const { login_id: running } = (await (await start(stopping, { provider: "codex", name: `work-${++names}` })).json()) as { login_id: string };
     await stopping.stopAll();
     expect(((await (await read(stopping, running)).json()) as { ended: boolean }).ended).toBe(true);
@@ -251,7 +281,7 @@ describe("a sign-in the browser follows", () => {
 
   it("opens no private terminal when shutdown happens during the CLI help probe", async () => {
     noHerdr();
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     const spawn = Bun.spawn;
     spies.push(spyOn(Bun, "spawn").mockImplementation(((...args: Parameters<typeof spawn>) => {
       const proc = spawn(...args);
@@ -272,7 +302,7 @@ describe("a sign-in the browser follows", () => {
       home: `codex:${join(root, ".codex")}`, launch: crypto.randomUUID(), pid: process.ppid,
       at: Date.now() - 31 * 60_000, private: true, birth: birth.birth,
     }] }));
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     service.persistTo(state);
     expect((await start(service, { provider: "codex", default: true })).status).toBe(409);
   });
@@ -287,7 +317,7 @@ describe("a sign-in the browser follows", () => {
       home: `codex:${join(root, ".codex")}`, launch: crypto.randomUUID(), pid: process.ppid,
       at: Date.now(), private: true, birth,
     }] }));
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     service.persistTo(state);
     expect((await start(service, { provider: "codex", default: true })).status).toBe(200);
   });
@@ -318,7 +348,7 @@ case "$*" in *--help*) echo "--device-auth"; exit 0;; esac
 "${process.execPath}" "${childScript}" &
 wait
 `, { mode: 0o755 });
-    const service = new UsageLoginService(root, { PATH: `${launcherBin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${launcherBin}:/usr/bin:/bin` }, ctx);
     try {
       const { login_id: login } = (await (await start(service, { provider: "codex", name: `work-${++names}` })).json()) as { login_id: string };
       await within(connected.promise);
@@ -341,7 +371,7 @@ echo "token=\${OVIS_TOKEN:-none}" > "${receipt("env")}"
 cat "${join(fixtures, "codex-device.pty")}"
 exec sleep 600
 `, { mode: 0o755 });
-    const scoped = new UsageLoginService(root, { PATH: `${envBin}:/usr/bin:/bin`, OVIS_TOKEN: "secret-token" });
+    const scoped = new UsageLoginService(root, { PATH: `${envBin}:/usr/bin:/bin`, OVIS_TOKEN: "secret-token" }, ctx);
     const { login_id: login } = (await (await start(scoped, { provider: "codex", name: `work-${++names}` })).json()) as { login_id: string };
     await promptWhen(scoped, login, (shown) => shown["user_code"] !== null);
     expect(readFileSync(receipt("env"), "utf8").trim()).toBe("token=none");
@@ -350,7 +380,7 @@ exec sleep 600
 
   it("removes the empty home a cancelled sign-in made, so the same account name can be tried again", async () => {
     noHerdr();
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     const name = `retry-${++names}`;
     const first = (await (await start(service, { provider: "codex", name })).json()) as { login_id: string };
     expect((await post(service, "cancel", { login: first.login_id })).status).toBe(204);
@@ -362,7 +392,7 @@ exec sleep 600
 
   it("reaches a sign-in only from the browser that started it, by a cookie no page script reads", async () => {
     noHerdr();
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     const started = await start(service, { provider: "codex", name: `work-${++names}` });
     const set = started.headers.get("set-cookie") ?? "";
     expect(set).toMatch(/HttpOnly/);
@@ -384,7 +414,7 @@ exec sleep 600
     mkdirSync(claudeBin, { recursive: true });
     // Claude writes its config into the new home as soon as it starts, before any sign-in
     writeFileSync(join(claudeBin, "claude"), `#!/bin/sh\ncase "$*" in *--help*) echo "auth login"; exit 0;; esac\necho '{}' > "$CLAUDE_CONFIG_DIR/.claude.json"\ncat "${join(fixtures, "claude.pty")}"\nexec sleep 600\n`, { mode: 0o755 });
-    const service = new UsageLoginService(root, { PATH: `${claudeBin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${claudeBin}:/usr/bin:/bin` }, ctx);
     const name = `init-${++names}`;
     const { login_id: login } = (await (await start(service, { provider: "claude", name })).json()) as { login_id: string };
     await promptWhen(service, login, (shown) => shown["url"] !== null);
@@ -396,7 +426,7 @@ exec sleep 600
 
   it("follows only Claude Code and Codex", async () => {
     noHerdr();
-    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` });
+    const service = new UsageLoginService(root, { PATH: `${bin}:/usr/bin:/bin` }, ctx);
     expect((await start(service, { provider: "grok" })).status).toBe(400);
     expect(existsSync(receipt("grok"))).toBe(false);
   });
