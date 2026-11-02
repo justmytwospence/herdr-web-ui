@@ -28,8 +28,9 @@ function Fixture() {
     recycleItems={false}
     initialScrollAtEnd
     maintainVisibleContentPosition
-    ListHeaderComponent={<div style={{ height: header }}>header</div>}
-    ListFooterComponent={<div className="padding-qa-footer" style={{ height: 20 }}>footer</div>}
+    // Font ink must not extend the fixed boxes and masquerade as the list's end padding.
+    ListHeaderComponent={<div style={{ height: header, overflow: "hidden" }}>header</div>}
+    ListFooterComponent={<div className="padding-qa-footer" style={{ height: 20, overflow: "hidden" }}>footer</div>}
   />;
 }
 
